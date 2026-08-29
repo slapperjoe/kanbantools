@@ -1,6 +1,15 @@
 name: kanban-tools
-version: 1.0.0
-description: "Kanban Tools — auto-salvage crashed-worker work, and kanban utilities."
+version: 1.1.0
+description: "Kanban Tools — auto-salvage crashed-worker work, plus toggleable UI tweaks (wide scrollbars, popout task button)."
 author: "Mark R"
 provides_hooks:
   - on_kanban_worker_exited
+config_schema:
+  wideScrollbars:
+    type: bool
+    default: true
+    description: "Widen Hermes desktop + webui scrollbars to 16px (matches the desktop/web scrollbar commits)."
+  popoutTaskButton:
+    type: bool
+    default: true
+    description: "Add an open-in-new-tab button to the kanban task drawer (desktop + webui)."

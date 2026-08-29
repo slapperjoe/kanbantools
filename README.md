@@ -12,6 +12,8 @@ it had to redo everything.
 
 ## What it does
 
+### 1. Worker-crash salvage (hook)
+
 On `on_kanban_worker_exited` (fires when the dispatcher reclaims a dead
 worker's task), if the worker exited **cleanly** (`rc=0` — a protocol
 violation, meaning the work likely succeeded but the completion call was
@@ -31,22 +33,40 @@ verifies + completes. Retry cost drops from hours to minutes.
   Skips tasks already `done`/`blocked` (a later run may have finished them),
   non-git worktrees, and non-clean exits.
 
-## Install
+### 2. Toggleable UI tweaks (config_schema)
 
-```bash
-# user plugins live under $HERMES_HOME/plugins (default ~/.hermes/plugins)
-mkdir -p ~/.hermes/plugins
-cp -r /home/mark/code/kanbantools ~/.hermes/plugins/kanbantools
-# restart the gateway/dispatcher to pick it up
-```
+Two UI features, each an independent on/off switch in the Hermes desktop
+Plugins page (Settings ▸ Plugins ▸ Kanban Tools):
 
-Layout:
+| Option | Default | Effect |
+|--------|---------|--------|
+| `wideScrollbars` | on | Widens Hermes desktop + webui scrollbars to 16px |
+| `popoutTaskButton` | on | Adds an "open in new tab" button to the kanban task drawer (opens the task in the webui dashboard) |
+
+Both are served by the plugin and applied at runtime:
+- **Webui** — `dashboard/dist/tools.js` (injected by the dashboard plugin
+  loader; hidden tab, no UI page).
+- **Desktop** — `desktop/plugin.js` (loaded by the desktop app's runtime
+  loader from `$HERMES_HOME/plugins/kanbantools/desktop/plugin.js`).
+
+Toggling in the Plugins page writes `plugins.entries.kanbantools.settings`
+via `plugins.manage config_set`; the feature code reads it through
+`/api/plugins/kanban-tools/config`. Requires the hermes-agent side that
+renders the generic per-plugin config panel (see below).
+
+### Layout
 
 ```
 kanbantools/
-  plugin.yaml      # manifest: name, hooks
-  __init__.py      # register(ctx) -> ctx.register_hook("on_kanban_worker_exited", ...)
-  salvage.py       # the salvage logic + hook handler
+  plugin.yaml              # manifest: hooks + config_schema (wideScrollbars, popoutTaskButton)
+  __init__.py              # register(ctx) -> ctx.register_hook("on_kanban_worker_exited", ...)
+  salvage.py               # the salvage logic + hook handler
+  dashboard/
+    manifest.json          # hidden-tab dashboard plugin: serves assets + mounts plugin_api.py
+    plugin_api.py          # /config (GET/PUT) + /dashboard-url (GET)
+    dist/tools.js          # webui: applies the two features per config
+  desktop/
+    plugin.js              # desktop half: applies the two features per config
 ```
 
 ## Manual / dry-run
