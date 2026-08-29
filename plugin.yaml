@@ -1,0 +1,6 @@
+name: kanban-tools
+version: 1.0.0
+description: "Kanban Tools — auto-salvage crashed-worker work, and kanban utilities."
+author: "Mark R"
+provides_hooks:
+  - on_kanban_worker_exited
