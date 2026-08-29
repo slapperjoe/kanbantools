@@ -14,7 +14,7 @@
  * the desktop half lives in ../desktop/plugin.js.
  */
 (function () {
-  var CONFIG_URL = "api/plugins/kanban-tools/config";
+  var CONFIG_URL = "/api/plugins/kanban-tools/config";
   var PLUGIN = "kanban-tools";
   var registered = false;
 
@@ -157,12 +157,20 @@
 
   // ---- boot ----
   function boot() {
-    var base = window.location.pathname.replace(/\/[^/]*$/, "/");
-    fetch(base + CONFIG_URL)
-      .then(function (r) {
-        if (!r.ok) throw new Error("config fetch " + r.status);
-        return r.json();
-      })
+    // Use the SDK's auth-aware fetchJSON (injects the session token / cookie
+    // for both loopback and gated modes). Plain fetch would 401 and the
+    // features would silently stay at their defaults.
+    var SDK = window.__HERMES_PLUGIN_SDK__;
+    var fetchConfig = (SDK && SDK.fetchJSON)
+      ? SDK.fetchJSON.bind(SDK)
+      : function (url) {
+          return fetch(url).then(function (r) {
+            if (!r.ok) throw new Error("config fetch " + r.status);
+            return r.json();
+          });
+        };
+
+    fetchConfig("api/plugins/kanban-tools/config")
       .then(function (cfg) {
         applyWideScrollbars(cfg.wideScrollbars !== false);
         applyPopoutStyles(cfg.popoutTaskButton !== false);

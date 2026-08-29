@@ -46,13 +46,15 @@ Plugins page (Settings ▸ Plugins ▸ Kanban Tools):
 Both are served by the plugin and applied at runtime:
 - **Webui** — `dashboard/dist/tools.js` (injected by the dashboard plugin
   loader; hidden tab, no UI page).
-- **Desktop** — `desktop/plugin.js` (loaded by the desktop app's runtime
-  loader from `$HERMES_HOME/plugins/kanbantools/desktop/plugin.js`).
+- **Desktop** — the bundled Hermes kanban plugin reads the config via the
+  `plugins.manage` RPC and applies the features in the desktop app (scrollbar
+  CSS + native popout task tab). No separate desktop plugin.
 
 Toggling in the Plugins page writes `plugins.entries.kanbantools.settings`
 via `plugins.manage config_set`; the feature code reads it through
-`/api/plugins/kanban-tools/config`. Requires the hermes-agent side that
-renders the generic per-plugin config panel (see below).
+`/api/plugins/kanban-tools/config` (webui) or the `plugins.manage list` RPC
+(desktop). Requires the hermes-agent side that renders the generic per-plugin
+config panel + reads the config in the kanban plugin.
 
 ### Layout
 
@@ -65,8 +67,6 @@ kanbantools/
     manifest.json          # hidden-tab dashboard plugin: serves assets + mounts plugin_api.py
     plugin_api.py          # /config (GET/PUT) + /dashboard-url (GET)
     dist/tools.js          # webui: applies the two features per config
-  desktop/
-    plugin.js              # desktop half: applies the two features per config
 ```
 
 ## Manual / dry-run
