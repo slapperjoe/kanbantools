@@ -16,7 +16,7 @@
          font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 20px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 20px; }
 
   .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
             flex-wrap: wrap; }
@@ -116,6 +116,59 @@
           border: 1px solid var(--border); border-radius: 6px; color: var(--text);
           background: var(--panel2); }
   .chip:hover { border-color: var(--accent); }
+
+  /* ---- action bar ---- */
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+             padding-top: 12px; border-top: 1px solid var(--border); }
+  .btn { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+         border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 600;
+         cursor: pointer; transition: border-color .12s, background .12s; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.danger { border-color: #7a3232; color: var(--err); }
+  .btn.danger:hover { background: #2a1616; }
+  .btn.ok { border-color: #2f6b45; color: var(--ok); }
+  .btn.ok:hover { background: #12261a; }
+  .btn.warn { border-color: #6b5527; color: var(--warn); }
+  .btn.warn:hover { background: #241d0e; }
+
+  .actionmsg { font-size: 12px; color: var(--muted); margin-top: 8px; word-break: break-word; }
+  .actionmsg.error { color: var(--err); }
+  .actionmsg.ok { color: var(--ok); }
+
+  /* ---- edit form ---- */
+  .editgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  @media (max-width: 640px) { .editgrid { grid-template-columns: 1fr; } }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .field input, .field textarea, .field select {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); padding: 7px 10px;
+    font: 13px/1.4 system-ui, monospace; }
+  .field textarea { resize: vertical; min-height: 60px; }
+  .field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--accent); }
+  .editrow { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+
+  /* ---- attachments ---- */
+  .att-item { display: flex; align-items: center; gap: 10px; padding: 6px 0;
+              border-bottom: 1px solid var(--border); font-size: 13px; }
+  .att-item:last-child { border-bottom: 0; }
+  .att-name { flex: 1; word-break: break-all; }
+  .att-meta { color: var(--muted); font-size: 11.5px; font-family: var(--mono); white-space: nowrap; }
+  .att-del { background: transparent; border: 0; color: var(--err); cursor: pointer; font-size: 14px; }
+  .att-up { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .att-up input[type=file] { color: var(--muted); font-size: 12px; }
+
+  /* ---- home channels ---- */
+  .home-item { display: flex; align-items: center; gap: 10px; padding: 6px 0;
+               border-bottom: 1px solid var(--border); font-size: 13px; }
+  .home-item:last-child { border-bottom: 0; }
+  .home-name { flex: 1; }
+  .home-sub { font-size: 11px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border);
+               cursor: pointer; background: transparent; color: var(--muted); font-weight: 600; }
+  .home-sub.on { color: var(--ok); border-color: #2f6b45; }
+  .home-sub:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -136,9 +189,7 @@
   var taskId = params.get("task_id") || "";
   var board = params.get("board") || "";
 
-  // The dashboard may be served under a base path (HERMES_BASE_PATH). This
-  // page lives at <base>/dashboard-plugins/kanban-tools/dist/task.html —
-  // derive the base so API calls resolve correctly.
+  // Base path: this page lives at <base>/dashboard-plugins/kanban-tools/dist/task.html
   var marker = "/dashboard-plugins/";
   var base = "";
   var pidx = window.location.pathname.indexOf(marker);
@@ -162,13 +213,21 @@
     if (token) headers.set(SESSION_HEADER, token);
     return fetch(url, Object.assign({}, init || {}, { headers: headers, credentials: "include" }));
   }
-
+  function checkOk(r) {
+    if (!r.ok) {
+      return r.text().then(function (t) {
+        var msg = t;
+        try { var j = JSON.parse(t); msg = j.detail || t; } catch (e) {}
+        throw new Error("HTTP " + r.status + ": " + String(msg).slice(0, 300));
+      });
+    }
+    return r.json();
+  }
   function esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
-
   function timeAgo(ts) {
     if (!ts) return "—";
     var t = typeof ts === "number" ? ts * 1000 : new Date(ts).getTime();
@@ -184,232 +243,264 @@
     var t = typeof ts === "number" ? ts * 1000 : new Date(ts).getTime();
     return new Date(t).toLocaleString();
   }
+  function fmtBytes(n) {
+    if (n == null) return "—";
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1048576).toFixed(1) + " MB";
+  }
 
   var boardQuery = board ? "&board=" + encodeURIComponent(board) : "";
   var apiUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + boardQuery;
   var logUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?tail=150000" + boardQuery;
 
+  // Current state (loaded + mutated)
+  var state = null;
+  var logData = null;
+  var assignees = [];
+  var profiles = [];
+  var homeChannels = [];
+  var actionMsg = null;      // {text, kind}
+  var editMode = false;
+  var editDraft = null;
+  var refreshTimer = null;
+
   document.getElementById("crumb").textContent = taskId;
   document.getElementById("boardcrumb").textContent = board ? ("board: " + board) : "";
 
-  // Load detail + log in parallel. Log is the priority view.
-  Promise.all([
-    authedFetch(apiUrl).then(checkOk),
-    authedFetch(logUrl).then(checkOk),
-  ])
-    .then(function (res) {
-      render(res[0], res[1]);
-    })
-    .catch(function (e) {
-      document.getElementById("content").innerHTML =
-        '<div class="errbox">Failed to load task: ' + esc((e && e.message) || e) +
-        "</div>";
+  function loadAll() {
+    return Promise.all([
+      authedFetch(apiUrl).then(checkOk),
+      authedFetch(logUrl).then(checkOk),
+      authedFetch(base + "/api/plugins/kanban/assignees" + boardQuery).then(checkOk).catch(function () { return { assignees: [] }; }),
+      authedFetch(base + "/api/plugins/kanban/profiles").then(checkOk).catch(function () { return { profiles: [] }; }),
+      authedFetch(base + "/api/plugins/kanban/home-channels?task_id=" + encodeURIComponent(taskId) + boardQuery).then(checkOk).catch(function () { return { home_channels: [] }; }),
+    ]).then(function (r) {
+      state = r[0];
+      logData = r[1];
+      assignees = (r[2].assignees || []).map(function (a) {
+        return typeof a === "string" ? a : (a.name || "");
+      }).filter(Boolean);
+      profiles = (r[3].profiles || []);
+      homeChannels = r[4].home_channels || [];
+      render();
+      startLogRefresh();
     });
-
-  function checkOk(r) {
-    if (!r.ok) {
-      return r.text().then(function (t) {
-        throw new Error("HTTP " + r.status + ": " + t.slice(0, 200));
-      });
-    }
-    return r.json();
   }
+
+  loadAll().catch(function (e) {
+    document.getElementById("content").innerHTML =
+      '<div class="errbox">Failed to load task: ' + esc((e && e.message) || e) + "</div>";
+  });
 
   function statusPill(status) {
     return '<span class="pill ' + esc(status || "") + '">' + esc(status || "?") + "</span>";
   }
 
-  function render(data, logData) {
-    var task = data.task || {};
-    var html = "";
-
-    // --- compact header ---
-    html += '<div class="card">';
-    html += '<h1>' + esc(task.title || "(untitled)") + "</h1>";
-    html += '<div class="task-id">' + esc(task.id || taskId) + "</div>";
-    html += '<div class="badges">';
-    html += '<span class="badge status">' + statusPill(task.status) + "</span>";
-    if (task.assignee) html += '<span class="badge assignee">' + esc(task.assignee) + "</span>";
-    if (board) html += '<span class="badge board">' + esc(board) + "</span>";
-    if (task.priority) html += '<span class="badge">P' + esc(task.priority) + "</span>";
-    html += "</div>";
-    html += "</div>";
-
-    // --- LOG (priority view) ---
-    html += '<div class="section-title" id="log-title">Log</div>';
-    html += '<div class="card" style="padding:0">';
-    html += '<div id="logbox" class="logbox"></div>';
-    html += "</div>";
-
-    // --- details ---
-    html += '<details class="collapsed"><summary>Details</summary><div class="card"><div class="meta-grid">';
-    html += meta("Created", fmtTs(task.created_at) + " (" + timeAgo(task.created_at) + ")");
-    html += meta("Started", fmtTs(task.started_at));
-    html += meta("Completed", fmtTs(task.completed_at));
-    html += meta("Max retries", task.max_retries);
-    html += meta("Workspace", esc(task.workspace_path || "—"));
-    html += meta("Branch", esc(task.branch_name || "—"));
-    html += meta("Model", esc(task.model_override || "—"));
-    html += meta("Provider", esc(task.provider_override || "—"));
-    html += "</div></div></details>";
-
-    if (task.body && task.body.trim()) {
-      html += '<details class="collapsed"><summary>Description</summary><div class="card"><div class="body">' + esc(task.body) + "</div></div></details>";
-    }
-
-    // --- diagnostics ---
-    html += '<details class="collapsed"><summary>Diagnostics</summary>';
-    if (task.diagnostics && task.diagnostics.length) {
-      task.diagnostics.forEach(function (d) {
-        html += '<div class="diag' + (d.severity === "error" ? " error" : "") + '">' +
-          '<div class="dt">' + esc(d.title || d.kind || "Issue") + "</div>" +
-          '<div class="dd">' + esc(d.detail || d.message || "") + "</div>" +
-          "</div>";
-      });
-    } else {
-      html += '<div class="card empty">No diagnostics.</div>';
-    }
-    html += "</details>";
-
-    // --- links (parents / children) ---
-    var links = data.links || {};
-    if ((links.parents && links.parents.length) || (links.children && links.children.length)) {
-      html += '<div class="section-title">Relations</div><div class="card">';
-      if (links.parents && links.parents.length) {
-        html += '<div class="meta-grid"><div class="k">Parents</div><div class="linkrow">';
-        links.parents.forEach(function (p) {
-          html += linkChip(p, board);
-        });
-        html += "</div></div>";
-      }
-      if (links.children && links.children.length) {
-        html += '<div class="meta-grid"><div class="k">Children</div><div class="linkrow">';
-        links.children.forEach(function (c) {
-          html += linkChip(c, board);
-        });
-        html += "</div></div>";
-      }
-      if (data.child_results && data.child_results.length) {
-        html += '<table><tr><th>Child</th><th>Status</th><th>Summary</th></tr>';
-        data.child_results.forEach(function (cr) {
-          html += "<tr><td>" + linkChip(cr.id, board) + "</td><td>" +
-            statusPill(cr.status) + "</td><td>" + esc((cr.latest_summary || cr.result || "").slice(0, 120)) +
-            "</td></tr>";
-        });
-        html += "</table>";
-      }
-      html += "</div>";
-    }
-
-    // --- runs ---
-    var runs = data.runs || [];
-    html += '<div class="section-title">Runs (' + runs.length + ")</div>";
-    if (runs.length) {
-      html += '<div class="card"><table><tr><th>#</th><th>Status</th><th>Outcome</th><th>Profile</th><th>Started</th><th>Summary / Error</th></tr>';
-      runs.forEach(function (r) {
-        var label = r.status || "—";
-        var pc = (r.outcome && r.outcome.toLowerCase().indexOf("crash") >= 0) ? "crashed"
-               : (r.status || "").toLowerCase();
-        html += "<tr><td>" + esc(r.id) + "</td>" +
-          "<td><span class='pill " + pc + "'>" + esc(label) + "</span></td>" +
-          "<td>" + esc(r.outcome || "—") + "</td>" +
-          "<td>" + esc(r.profile || "—") + "</td>" +
-          "<td>" + fmtTs(r.started_at) + "</td>" +
-          "<td class='run-sum'>" + esc((r.summary || r.error || "").slice(0, 220)) + "</td></tr>";
-      });
-      html += "</table></div>";
-    } else {
-      html += '<div class="card empty">No runs yet.</div>';
-    }
-
-    // --- comments ---
-    var comments = data.comments || [];
-    html += '<div class="section-title">Comments (' + comments.length + ")</div>";
-    html += '<div class="card">';
-    if (comments.length) {
-      comments.forEach(function (c) {
-        html += '<div class="comment"><span class="who">' + esc(c.author || "?") +
-          "</span><span class='when'>" + fmtTs(c.created_at) + " (" + timeAgo(c.created_at) + ")</span>" +
-          '<div class="cbody">' + esc(c.body) + "</div></div>";
-      });
-    } else {
-      html += '<div class="empty">No comments.</div>';
-    }
-    // --- add-comment form ---
-    html += '<div class="commentform">' +
-      '<textarea id="kt-comment-input" rows="2" placeholder="Add a comment\u2026"></textarea>' +
-      '<button id="kt-comment-btn" type="button">Post</button>' +
-      '<span id="kt-comment-msg" class="commentmsg"></span>' +
-      "</div>";
-    html += "</div>";
-
-    // --- events (scrollable, most recent 10) ---
-    var events = data.events || [];
-    html += '<div class="section-title">Events (latest ' + Math.min(events.length, 10) + ' of ' + events.length + ")</div>";
-    if (events.length) {
-      html += '<div class="card" style="padding:0"><div class="eventbox">';
-      // events are appended in chronological order; show the LAST 10.
-      events.slice(-10).forEach(function (e) {
-        var pd = e.payload || "";
-        html += '<div class="event"><span class="when">' + timeAgo(e.created_at) + "</span>" +
-          '<span class="kind">' + esc(e.kind) + "</span>" +
-          '<span class="data">' + esc(typeof pd === "string" ? pd : JSON.stringify(pd)) + "</span></div>";
-      });
-      html += "</div></div>";
-    } else {
-      html += '<div class="card empty">No events.</div>';
-    }
-
-    document.getElementById("content").innerHTML = html;
-
-    // ---- wire add-comment form ----
-    var cbtn = document.getElementById("kt-comment-btn");
-    var cinput = document.getElementById("kt-comment-input");
-    var cmsg = document.getElementById("kt-comment-msg");
-    if (cbtn && cinput) {
-      function postComment() {
-        var body = cinput.value.trim();
-        if (!body) return;
-        cbtn.disabled = true;
-        cmsg.textContent = "Posting\u2026";
-        authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/comments" + boardQuery, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body: body, author: "dashboard" }),
-        })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.text().then(function (t) { throw new Error("HTTP " + r.status + ": " + t.slice(0, 120)); });
-            }
-            return r.json();
-          })
-          .then(function () {
-            cinput.value = "";
-            cmsg.textContent = "Posted.";
-            // Reload detail so the new comment appears.
-            authedFetch(apiUrl).then(checkOk).then(function (d) {
-              render(d, logData);
-            }).catch(function () {});
-          })
-          .catch(function (e) {
-            cmsg.textContent = "Error: " + ((e && e.message) || e);
-          })
-          .then(function () { cbtn.disabled = false; });
-      }
-      cbtn.addEventListener("click", postComment);
-      cinput.addEventListener("keydown", function (ev) {
-        if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") postComment();
-      });
-    }
-
-    // ---- fill the log (priority view) ----
-    fillLog(logData);
-    startLogRefresh(task.status);
+  // ---- action helpers ----
+  function patch(payload) {
+    return authedFetch(apiUrl, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(checkOk);
+  }
+  function post(path, payload) {
+    return authedFetch(base + "/api/plugins/kanban" + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    }).then(checkOk);
+  }
+  function del(path) {
+    return authedFetch(base + "/api/plugins/kanban" + path, { method: "DELETE" }).then(checkOk);
+  }
+  function setMsg(text, kind) {
+    actionMsg = { text: text, kind: kind || "" };
+    render();
+  }
+  function reload() {
+    return Promise.all([
+      authedFetch(apiUrl).then(checkOk),
+      authedFetch(base + "/api/plugins/kanban/home-channels?task_id=" + encodeURIComponent(taskId) + boardQuery).then(checkOk).catch(function () { return { home_channels: homeChannels }; }),
+    ]).then(function (r) {
+      state = r[0];
+      homeChannels = r[1].home_channels || homeChannels;
+      editMode = false;
+      actionMsg = null;
+      render();
+      startLogRefresh();
+    });
   }
 
-  var refreshTimer = null;
+  function doStatus(newStatus, extra) {
+    var payload = { status: newStatus };
+    Object.keys(extra || {}).forEach(function (k) { payload[k] = extra[k]; });
+    patch(payload)
+      .then(function () { setMsg("Moved to " + newStatus + ".", "ok"); return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
 
-  function fillLog(logData, autoScroll) {
+  function promptBlock() {
+    var reason = window.prompt("Block reason:", "");
+    if (reason === null) return;
+    doStatus("blocked", { block_reason: reason });
+  }
+  function promptComplete() {
+    var summary = window.prompt("Completion summary:", "");
+    if (summary === null) return;
+    doStatus("done", { summary: summary });
+  }
+  function promptReassign() {
+    var names = profiles.map(function (p) { return p.name; });
+    if (!names.length) names = assignees;
+    if (!names.length) { setMsg("No profiles available to reassign to.", "error"); return; }
+    var v = window.prompt("Reassign to profile (" + names.join(", ") + "):");
+    if (!v) return;
+    var reclaim = window.confirm("Reclaim current worker first? (Cancel = leave the claim)");
+    post("/tasks/" + encodeURIComponent(taskId) + "/reassign" + boardQuery,
+      { profile: v, reclaim_first: reclaim })
+      .then(function () { setMsg("Reassigned to " + v + ".", "ok"); return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function doReclaim() {
+    post("/tasks/" + encodeURIComponent(taskId) + "/reclaim" + boardQuery, { reason: "reclaimed from task page" })
+      .then(function () { setMsg("Worker reclaimed.", "ok"); return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function doSpecify() {
+    post("/tasks/" + encodeURIComponent(taskId) + "/specify" + boardQuery, {})
+      .then(function (o) {
+        setMsg(o && o.ok ? ("Specified: " + (o.new_title || "")) : (o && o.reason || "specify returned non-OK"), o && o.ok ? "ok" : "error");
+        return reload();
+      })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function doDecompose() {
+    post("/tasks/" + encodeURIComponent(taskId) + "/decompose" + boardQuery, {})
+      .then(function (o) {
+        setMsg(o && o.ok ? ("Decomposed into " + (o.child_ids || []).length + " children") : (o && o.reason || "decompose returned non-OK"), o && o.ok ? "ok" : "error");
+        return reload();
+      })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function doEstimate() {
+    post("/tasks/" + encodeURIComponent(taskId) + "/estimate" + boardQuery, {})
+      .then(function (o) {
+        if (o && o.ok) setMsg("Estimate: ~" + o.est_tokens + " tokens, complexity " + o.complexity + " — " + (o.rationale || ""), "ok");
+        else setMsg(o && o.reason || "estimate unavailable", "error");
+      })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function doTerminateRun(runId) {
+    if (!window.confirm("Terminate run #" + runId + "? This kills the worker process.")) return;
+    post("/runs/" + runId + "/terminate" + boardQuery, { reason: "terminated from task page" })
+      .then(function () { setMsg("Run #" + runId + " terminated.", "ok"); return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function doInspectRun(runId) {
+    authedFetch(base + "/api/plugins/kanban/runs/" + runId + "/inspect" + boardQuery)
+      .then(checkOk)
+      .then(function (o) {
+        if (!o.alive) { setMsg("Run #" + runId + " not alive: " + (o.reason || ""), ""); return; }
+        setMsg("Run #" + runId + " alive (pid " + o.pid + "): cpu " + (o.cpu_percent != null ? o.cpu_percent + "%" : "?") +
+          ", threads " + (o.num_threads != null ? o.num_threads : "?") +
+          ", rss " + fmtBytes(o.memory_rss_bytes), "ok");
+      })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+
+  // ---- edit ----
+  function startEdit() {
+    var t = state.task || {};
+    editDraft = {
+      title: t.title || "",
+      body: t.body || "",
+      priority: t.priority != null ? String(t.priority) : "0",
+      assignee: t.assignee || "",
+      model_override: t.model_override || "",
+      provider_override: t.provider_override || "",
+    };
+    editMode = true;
+    actionMsg = null;
+    render();
+    renderEditForm();
+  }
+  function cancelEdit() { editMode = false; actionMsg = null; render(); }
+  function saveEdit() {
+    var d = editDraft;
+    var payload = {};
+    if (d.title !== (state.task.title || "")) payload.title = d.title;
+    if (d.body !== (state.task.body || "")) payload.body = d.body;
+    if (String(d.priority) !== String(state.task.priority != null ? state.task.priority : "0")) payload.priority = parseInt(d.priority, 10) || 0;
+    if (d.assignee !== (state.task.assignee || "")) payload.assignee = d.assignee || "";
+    if (d.model_override !== (state.task.model_override || "")) payload.model_override = d.model_override || null;
+    if (d.provider_override !== (state.task.provider_override || "")) payload.provider_override = d.provider_override || null;
+    if (!Object.keys(payload).length) { cancelEdit(); return; }
+    patch(payload)
+      .then(function () { setMsg("Saved.", "ok"); return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function renderEditForm() {
+    var title = document.getElementById("kt-edit-title");
+    var body = document.getElementById("kt-edit-body");
+    var pri = document.getElementById("kt-edit-priority");
+    var asg = document.getElementById("kt-edit-assignee");
+    var mo = document.getElementById("kt-edit-model");
+    var po = document.getElementById("kt-edit-provider");
+    if (title) title.value = editDraft.title;
+    if (body) body.value = editDraft.body;
+    if (pri) pri.value = editDraft.priority;
+    if (asg) asg.value = editDraft.assignee;
+    if (mo) mo.value = editDraft.model_override;
+    if (po) po.value = editDraft.provider_override;
+  }
+  function bindEdit() {
+    var title = document.getElementById("kt-edit-title");
+    var body = document.getElementById("kt-edit-body");
+    var pri = document.getElementById("kt-edit-priority");
+    var asg = document.getElementById("kt-edit-assignee");
+    var mo = document.getElementById("kt-edit-model");
+    var po = document.getElementById("kt-edit-provider");
+    if (title) title.addEventListener("input", function (e) { editDraft.title = e.target.value; });
+    if (body) body.addEventListener("input", function (e) { editDraft.body = e.target.value; });
+    if (pri) pri.addEventListener("input", function (e) { editDraft.priority = e.target.value; });
+    if (asg) asg.addEventListener("change", function (e) { editDraft.assignee = e.target.value; });
+    if (mo) mo.addEventListener("input", function (e) { editDraft.model_override = e.target.value; });
+    if (po) po.addEventListener("input", function (e) { editDraft.provider_override = e.target.value; });
+    var save = document.getElementById("kt-edit-save");
+    var cancel = document.getElementById("kt-edit-cancel");
+    if (save) save.addEventListener("click", saveEdit);
+    if (cancel) cancel.addEventListener("click", cancelEdit);
+  }
+
+  // ---- attachments ----
+  function uploadAttachment(file) {
+    var fd = new FormData();
+    fd.append("file", file);
+    fd.append("uploaded_by", "dashboard");
+    authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/attachments" + boardQuery, { method: "POST", body: fd })
+      .then(checkOk)
+      .then(function () { setMsg("Attachment uploaded.", "ok"); return reload(); })
+      .catch(function (e) { setMsg("Upload failed: " + ((e && e.message) || e), "error"); });
+  }
+  function deleteAttachment(id, name) {
+    if (!window.confirm("Delete attachment \"" + name + "\"?")) return;
+    del("/attachments/" + id + boardQuery)
+      .then(function () { setMsg("Attachment deleted.", "ok"); return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+
+  // ---- home channels ----
+  function toggleHome(platform, currentlyOn) {
+    var path = "/tasks/" + encodeURIComponent(taskId) + "/home-subscribe/" + encodeURIComponent(platform) + boardQuery;
+    var p = currentlyOn ? del(path) : post(path, {});
+    p.then(function () { return reload(); })
+      .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+
+  // ---- log ----
+  function fillLog(autoScroll) {
     var box = document.getElementById("logbox");
     var metaEl = document.getElementById("log-title");
     if (!box) return;
@@ -429,33 +520,336 @@
       box.textContent = "Log is empty.";
       return;
     }
-    var atBottom = autoScroll === undefined
-      ? true
-      : (box.scrollHeight - box.scrollTop - box.clientHeight) < 40;
+    var atBottom = autoScroll === undefined ? true : (box.scrollHeight - box.scrollTop - box.clientHeight) < 40;
     box.className = "logbox";
     box.textContent = content;
     if (atBottom) box.scrollTop = box.scrollHeight;
   }
-
-  // Auto-refresh the log while the task is still active.
-  function startLogRefresh(status) {
+  function startLogRefresh() {
     if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    if (!state || !state.task) return;
+    var status = state.task.status;
     var active = (status === "running" || status === "ready" || status === "triage");
     if (!active) return;
     refreshTimer = setInterval(function () {
-      authedFetch(logUrl)
-        .then(checkOk)
-        .then(function (lg) {
-          fillLog(lg, false); // stay pinned to bottom only if already at bottom
-        })
-        .catch(function () { /* keep showing the last good log */ });
+      authedFetch(logUrl).then(checkOk).then(function (lg) { logData = lg; fillLog(false); })
+        .catch(function () {});
     }, 10000);
+  }
+
+  // ---- render ----
+  function actionButtons(task) {
+    var st = task.status;
+    var btns = [];
+    if (st === "triage") {
+      btns.push(['<button class="btn primary" id="kt-act-specify">Specify</button>']);
+      btns.push(['<button class="btn primary" id="kt-act-decompose">Decompose</button>']);
+      btns.push(['<button class="btn" id="kt-act-ready">Make ready</button>']);
+      btns.push(['<button class="btn" id="kt-act-block">Block</button>']);
+    } else if (st === "todo" || st === "ready") {
+      btns.push(['<button class="btn primary" id="kt-act-ready">Make ready</button>']);
+      btns.push(['<button class="btn warn" id="kt-act-block">Block</button>']);
+      btns.push(['<button class="btn" id="kt-act-review">Request review</button>']);
+      btns.push(['<button class="btn ok" id="kt-act-complete">Complete</button>']);
+    } else if (st === "running") {
+      btns.push(['<button class="btn warn" id="kt-act-reclaim">Reclaim worker</button>']);
+      btns.push(['<button class="btn warn" id="kt-act-block">Block</button>']);
+      btns.push(['<button class="btn ok" id="kt-act-complete">Complete</button>']);
+    } else if (st === "blocked" || st === "scheduled") {
+      btns.push(['<button class="btn primary" id="kt-act-ready">Unblock → ready</button>']);
+      btns.push(['<button class="btn" id="kt-act-review">Request review</button>']);
+    } else if (st === "review") {
+      btns.push(['<button class="btn primary" id="kt-act-ready">Accept (ready)</button>']);
+      btns.push(['<button class="btn ok" id="kt-act-complete">Complete</button>']);
+    } else if (st === "done") {
+      btns.push(['<button class="btn" id="kt-act-archive">Archive</button>']);
+    }
+    // always available
+    btns.push(['<button class="btn" id="kt-act-edit">Edit</button>']);
+    btns.push(['<button class="btn" id="kt-act-reassign">Reassign</button>']);
+    btns.push(['<button class="btn" id="kt-act-estimate">Estimate</button>']);
+    return btns.map(function (b) { return b[0]; }).join("");
+  }
+
+  function render() {
+    if (!state) return;
+    var task = state.task || {};
+    var html = "";
+
+    // --- header + actions ---
+    html += '<div class="card">';
+    html += '<h1>' + esc(task.title || "(untitled)") + "</h1>";
+    html += '<div class="task-id">' + esc(task.id || taskId) + "</div>";
+    html += '<div class="badges">';
+    html += '<span class="badge status">' + statusPill(task.status) + "</span>";
+    if (task.assignee) html += '<span class="badge assignee">' + esc(task.assignee) + "</span>";
+    if (board) html += '<span class="badge board">' + esc(board) + "</span>";
+    if (task.priority) html += '<span class="badge">P' + esc(task.priority) + "</span>";
+    if (task.model_override) html += '<span class="badge">model: ' + esc(task.model_override) + "</span>";
+    if (task.consecutive_failures) html += '<span class="badge" style="color:var(--err);border-color:#7a3232">' + esc(task.consecutive_failures) + " failures</span>";
+    html += "</div>";
+    html += '<div class="actions">' + actionButtons(task) + "</div>";
+    if (actionMsg) {
+      html += '<div class="actionmsg ' + (actionMsg.kind === "error" ? "error" : actionMsg.kind === "ok" ? "ok" : "") + '">' + esc(actionMsg.text) + "</div>";
+    }
+    html += "</div>";
+
+    // --- edit form (when in edit mode) ---
+    if (editMode) {
+      var assigneeOpts = '<option value=""></option>' + assignees.map(function (a) {
+        return '<option value="' + esc(a) + '">' + esc(a) + "</option>";
+      }).join("");
+      html += '<div class="card"><div class="section-title">Edit task</div><div class="editgrid">';
+      html += '<div class="field" style="grid-column:1/-1"><label>Title</label><input id="kt-edit-title" type="text"></div>';
+      html += '<div class="field" style="grid-column:1/-1"><label>Body</label><textarea id="kt-edit-body"></textarea></div>';
+      html += '<div class="field"><label>Priority</label><input id="kt-edit-priority" type="number" min="0"></div>';
+      html += '<div class="field"><label>Assignee</label><select id="kt-edit-assignee">' + assigneeOpts + "</select></div>";
+      html += '<div class="field"><label>Model override</label><input id="kt-edit-model" type="text" placeholder="e.g. qwen3.8-27b"></div>';
+      html += '<div class="field"><label>Provider override</label><input id="kt-edit-provider" type="text" placeholder="e.g. lwoody-ninfer"></div>';
+      html += "</div>";
+      html += '<div class="editrow"><button class="btn primary" id="kt-edit-save">Save</button>' +
+        '<button class="btn" id="kt-edit-cancel">Cancel</button></div></div>';
+    }
+
+    // --- LOG (priority view) ---
+    html += '<div class="section-title" id="log-title">Log</div>';
+    html += '<div class="card" style="padding:0">';
+    html += '<div id="logbox" class="logbox"></div>';
+    html += "</div>";
+
+    // --- details ---
+    html += '<details class="collapsed"><summary>Details</summary><div class="card"><div class="meta-grid">';
+    html += meta("Created", fmtTs(task.created_at) + " (" + timeAgo(task.created_at) + ")");
+    html += meta("Started", fmtTs(task.started_at));
+    html += meta("Completed", fmtTs(task.completed_at));
+    html += meta("Max retries", task.max_retries);
+    html += meta("Workspace", esc(task.workspace_path || "—"));
+    html += meta("Branch", esc(task.branch_name || "—"));
+    html += meta("Reasoning", esc(task.reasoning_effort || "—"));
+    html += meta("Current run", task.current_run_id != null ? task.current_run_id : "—");
+    html += meta("Worker pid", task.worker_pid != null ? task.worker_pid : "—");
+    html += meta("Last heartbeat", fmtTs(task.last_heartbeat_at));
+    html += meta("Created by", esc(task.created_by || "—"));
+    html += meta("Tenant", esc(task.tenant || "—"));
+    html += meta("Project", esc(task.project_id || "—"));
+    html += meta("Idempotency", esc(task.idempotency_key || "—"));
+    html += "</div></div></details>";
+
+    if (task.body && task.body.trim()) {
+      html += '<details class="collapsed"><summary>Description</summary><div class="card"><div class="body">' + esc(task.body) + "</div></div></details>";
+    }
+    if (task.latest_summary || task.result) {
+      html += '<details class="collapsed"><summary>Result</summary><div class="card"><div class="body">' +
+        esc(task.latest_summary || task.result) + "</div></div></details>";
+    }
+
+    // --- attachments ---
+    var atts = (state.attachments || []);
+    html += '<details class="collapsed"><summary>Attachments (' + atts.length + ")</summary>";
+    html += '<div class="card">';
+    if (atts.length) {
+      atts.forEach(function (a) {
+        html += '<div class="att-item">' +
+          '<span class="att-name"><a href="' + base + "/api/plugins/kanban/attachments/" + a.id + boardQuery + '" target="_blank">' + esc(a.filename) + "</a></span>" +
+          '<span class="att-meta">' + fmtBytes(a.size) + " · " + esc(a.uploaded_by || "?") + " · " + timeAgo(a.created_at) + "</span>" +
+          '<button class="att-del" data-del="' + a.id + '" data-name="' + esc(a.filename) + '" title="Delete">✕</button>' +
+          "</div>";
+      });
+    } else {
+      html += '<div class="empty">No attachments.</div>';
+    }
+    html += '<div class="att-up"><input type="file" id="kt-att-file"><button class="btn" id="kt-att-upload">Upload</button></div>';
+    html += "</div></details>";
+
+    // --- home channels ---
+    html += '<details class="collapsed"><summary>Notifications</summary><div class="card">';
+    if (homeChannels.length) {
+      homeChannels.forEach(function (h) {
+        html += '<div class="home-item"><span class="home-name">' + esc(h.platform) + (h.thread_id ? " #" + esc(h.thread_id) : "") + "</span>" +
+          '<button class="home-sub' + (h.subscribed ? " on" : "") + '" data-platform="' + esc(h.platform) + '" data-on="' + (h.subscribed ? "1" : "0") + '">' +
+          (h.subscribed ? "Subscribed" : "Subscribe") + "</button></div>";
+      });
+    } else {
+      html += '<div class="empty">No home channels configured. Set one via /sethome on a platform.</div>';
+    }
+    html += "</div></details>";
+
+    // --- diagnostics ---
+    html += '<details class="collapsed"><summary>Diagnostics</summary>';
+    if (task.diagnostics && task.diagnostics.length) {
+      task.diagnostics.forEach(function (d) {
+        html += '<div class="diag' + (d.severity === "error" ? " error" : "") + '">' +
+          '<div class="dt">' + esc(d.title || d.kind || "Issue") + "</div>" +
+          '<div class="dd">' + esc(d.detail || d.message || "") + "</div></div>";
+      });
+    } else {
+      html += '<div class="card empty">No diagnostics.</div>';
+    }
+    html += "</details>";
+
+    // --- relations ---
+    var links = state.links || {};
+    if ((links.parents && links.parents.length) || (links.children && links.children.length)) {
+      html += '<details class="collapsed"><summary>Relations</summary><div class="card">';
+      if (links.parents && links.parents.length) {
+        html += '<div class="meta-grid"><div class="k">Parents</div><div class="linkrow">';
+        links.parents.forEach(function (p) { html += linkChip(p, board); });
+        html += "</div></div>";
+      }
+      if (links.children && links.children.length) {
+        html += '<div class="meta-grid"><div class="k">Children</div><div class="linkrow">';
+        links.children.forEach(function (c) { html += linkChip(c, board); });
+        html += "</div></div>";
+      }
+      html += "</div></details>";
+    }
+
+    // --- runs ---
+    var runs = state.runs || [];
+    html += '<div class="section-title">Runs (' + runs.length + ")</div>";
+    if (runs.length) {
+      html += '<div class="card"><table><tr><th>#</th><th>Status</th><th>Outcome</th><th>Profile</th><th>Started</th><th>Summary / Error</th><th></th></tr>';
+      runs.forEach(function (r) {
+        var label = r.status || "—";
+        var pc = (r.outcome && r.outcome.toLowerCase().indexOf("crash") >= 0) ? "crashed" : (r.status || "").toLowerCase();
+        var running = (r.status === "running");
+        html += "<tr><td>" + esc(r.id) + "</td>" +
+          "<td><span class='pill " + pc + "'>" + esc(label) + "</span></td>" +
+          "<td>" + esc(r.outcome || "—") + "</td>" +
+          "<td>" + esc(r.profile || "—") + "</td>" +
+          "<td>" + fmtTs(r.started_at) + "</td>" +
+          "<td class='run-sum'>" + esc((r.summary || r.error || "").slice(0, 220)) + "</td>" +
+          "<td class='nowrap'>" +
+            '<button class="btn" data-inspect="' + r.id + '" title="Inspect process">🔍</button> ' +
+            (running ? '<button class="btn danger" data-term="' + r.id + '" title="Terminate">✕</button>' : "") +
+          "</td></tr>";
+      });
+      html += "</table></div>";
+    } else {
+      html += '<div class="card empty">No runs yet.</div>';
+    }
+
+    // --- comments ---
+    var comments = state.comments || [];
+    html += '<div class="section-title">Comments (' + comments.length + ")</div>";
+    html += '<div class="card">';
+    if (comments.length) {
+      comments.forEach(function (c) {
+        html += '<div class="comment"><span class="who">' + esc(c.author || "?") +
+          "</span><span class='when'>" + fmtTs(c.created_at) + " (" + timeAgo(c.created_at) + ")</span>" +
+          '<div class="cbody">' + esc(c.body) + "</div></div>";
+      });
+    } else {
+      html += '<div class="empty">No comments.</div>';
+    }
+    html += '<div class="commentform">' +
+      '<textarea id="kt-comment-input" rows="2" placeholder="Add a comment\u2026"></textarea>' +
+      '<button id="kt-comment-btn" type="button">Post</button>' +
+      '<span id="kt-comment-msg" class="commentmsg"></span>' +
+      "</div></div>";
+
+    // --- events (last 10, scrollable) ---
+    var events = state.events || [];
+    html += '<div class="section-title">Events (latest ' + Math.min(events.length, 10) + ' of ' + events.length + ")</div>";
+    if (events.length) {
+      html += '<div class="card" style="padding:0"><div class="eventbox">';
+      events.slice(-10).forEach(function (e) {
+        var pd = e.payload || "";
+        html += '<div class="event"><span class="when">' + timeAgo(e.created_at) + "</span>" +
+          '<span class="kind">' + esc(e.kind) + "</span>" +
+          '<span class="data">' + esc(typeof pd === "string" ? pd : JSON.stringify(pd)) + "</span></div>";
+      });
+      html += "</div></div>";
+    } else {
+      html += '<div class="card empty">No events.</div>';
+    }
+
+    document.getElementById("content").innerHTML = html;
+
+    fillLog(true);
+    if (editMode) { renderEditForm(); bindEdit(); }
+    bindActions();
+    bindAttachments();
+    bindHomeChannels();
+    bindComments();
+  }
+
+  function bindActions() {
+    var id = function (x) { return document.getElementById(x); };
+    var b = id("kt-act-ready");   if (b) b.addEventListener("click", function () { doStatus("ready", {}); });
+    var bl = id("kt-act-block");  if (bl) bl.addEventListener("click", promptBlock);
+    var c = id("kt-act-complete"); if (c) c.addEventListener("click", promptComplete);
+    var rv = id("kt-act-review"); if (rv) rv.addEventListener("click", function () { doStatus("review", {}); });
+    var ar = id("kt-act-archive"); if (ar) ar.addEventListener("click", function () { doStatus("archived", {}); });
+    var rc = id("kt-act-reclaim"); if (rc) rc.addEventListener("click", doReclaim);
+    var sp = id("kt-act-specify"); if (sp) sp.addEventListener("click", doSpecify);
+    var dc = id("kt-act-decompose"); if (dc) dc.addEventListener("click", doDecompose);
+    var ed = id("kt-act-edit");   if (ed) ed.addEventListener("click", startEdit);
+    var ra = id("kt-act-reassign"); if (ra) ra.addEventListener("click", promptReassign);
+    var es = id("kt-act-estimate"); if (es) es.addEventListener("click", doEstimate);
+    // run row actions
+    document.querySelectorAll("[data-inspect]").forEach(function (el) {
+      el.addEventListener("click", function () { doInspectRun(parseInt(el.getAttribute("data-inspect"), 10)); });
+    });
+    document.querySelectorAll("[data-term]").forEach(function (el) {
+      el.addEventListener("click", function () { doTerminateRun(parseInt(el.getAttribute("data-term"), 10)); });
+    });
+  }
+
+  function bindAttachments() {
+    var up = document.getElementById("kt-att-upload");
+    var file = document.getElementById("kt-att-file");
+    if (up && file) up.addEventListener("click", function () {
+      if (file.files && file.files.length) uploadAttachment(file.files[0]);
+    });
+    document.querySelectorAll(".att-del").forEach(function (el) {
+      el.addEventListener("click", function () {
+        deleteAttachment(parseInt(el.getAttribute("data-del"), 10), el.getAttribute("data-name") || "");
+      });
+    });
+  }
+
+  function bindHomeChannels() {
+    document.querySelectorAll(".home-sub").forEach(function (el) {
+      el.addEventListener("click", function () {
+        toggleHome(el.getAttribute("data-platform"), el.getAttribute("data-on") === "1");
+      });
+    });
+  }
+
+  function bindComments() {
+    var cbtn = document.getElementById("kt-comment-btn");
+    var cinput = document.getElementById("kt-comment-input");
+    var cmsg = document.getElementById("kt-comment-msg");
+    if (!cbtn || !cinput) return;
+    function postComment() {
+      var body = cinput.value.trim();
+      if (!body) return;
+      cbtn.disabled = true;
+      cmsg.textContent = "Posting\u2026";
+      authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/comments" + boardQuery, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: body, author: "dashboard" }),
+      })
+        .then(checkOk)
+        .then(function () {
+          cinput.value = "";
+          cmsg.textContent = "Posted.";
+          reload();
+        })
+        .catch(function (e) { cmsg.textContent = "Error: " + ((e && e.message) || e); })
+        .then(function () { cbtn.disabled = false; });
+    }
+    cbtn.addEventListener("click", postComment);
+    cinput.addEventListener("keydown", function (ev) {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") postComment();
+    });
   }
 
   function meta(k, v) {
     return '<div><div class="k">' + esc(k) + '</div><div class="v">' + v + "</div></div>";
   }
-
   function linkChip(id, brd) {
     var url = window.location.pathname + "?task_id=" + encodeURIComponent(id) +
       (brd ? "&board=" + encodeURIComponent(brd) : "");

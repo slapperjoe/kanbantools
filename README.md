@@ -54,10 +54,14 @@ The webui applies both features at runtime and exposes a settings page:
   config and applies the features (wide scrollbars via injected CSS, popout
   button via a MutationObserver on the kanban drawer header).
 - **Standalone task page** — the popout button opens `dist/task.html`, a
-  focused task view that shows the worker log front and center (auto-refresh
-  every 10s while the task is active) with the last 10 events in a scrollable
-  box, and supports posting comments. Details, diagnostics, runs, comments,
-  and relations sit collapsed below.
+  full management view of a single task. It shows the worker log front and
+  center (auto-refresh every 10s while the task is active) and matches the
+  kanban drawer's actions: status transitions (ready / block / review /
+  complete / archive / reclaim), reassign, specify, decompose, estimate,
+  edit (title / body / priority / assignee / model override), attachments
+  (upload / download / delete), home-channel notification subscribe, run
+  inspection + termination, posting comments, and a scrollable latest-10
+  event list. Details, diagnostics, relations sit collapsed below.
 
 The config key is `plugins.entries.kanban-tools.settings` — the plugin's
 `plugin.yaml` `config_schema` mirrors the same two keys, so the desktop
