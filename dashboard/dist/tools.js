@@ -47,8 +47,13 @@
   ].join("\n");
 
   var POPOUT_BUTTON_CSS = [
-    ".hermes-kanban-drawer-actions { display: flex; align-items: center; gap: 0.15rem; }",
-    ".hermes-kanban-drawer-open-tab { font-size: 1rem; }",
+    // Right-align the popout button in the drawer head. The head uses
+    // justify-content: space-between; with the task-id span first and the
+    // close button last, an inserted middle button lands CENTER. Switch to
+    // flex-start and push the popout right with margin-left: auto so both
+    // buttons group at the right edge next to the close button.
+    ".hermes-kanban-drawer-head:has([data-kt-popout]) { justify-content: flex-start; }",
+    ".hermes-kanban-drawer-open-tab { margin-left: auto; font-size: 1rem; align-self: center; }",
   ].join("\n");
 
   function applyWideScrollbars(on) {

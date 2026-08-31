@@ -89,6 +89,19 @@
   .event .kind { color: #7fd1ff; font-family: var(--mono); }
   .event .data { color: var(--muted); font-size: 12px; word-break: break-word; }
 
+  .eventbox { max-height: 220px; overflow-y: auto; padding: 10px 14px; }
+
+  .commentform { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px;
+                 padding-top: 10px; border-top: 1px solid var(--border); }
+  .commentform textarea { flex: 1; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font: 13px/1.4 system-ui, sans-serif;
+    padding: 8px 10px; resize: vertical; min-height: 44px; }
+  .commentform textarea:focus { outline: none; border-color: var(--accent); }
+  .commentform button { background: var(--accent); color: #fff; border: 0;
+    border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  .commentform button:disabled { opacity: .5; cursor: default; }
+  .commentmsg { font-size: 11.5px; color: var(--muted); align-self: center; white-space: nowrap; }
+
   .diag { border: 1px solid #6b5527; background: #221d0f; border-radius: 8px;
           padding: 10px 12px; margin-bottom: 8px; }
   .diag.error { border-color: #7a3232; background: #261416; }
@@ -140,14 +153,14 @@
 
   // ---- auth: mirror the SDK's fetchJSON (session-token header + cookie) ----
   var SESSION_HEADER = "X-Hermes-Session-Token";
-  function authedFetch(url) {
-    var headers = new Headers();
+  function authedFetch(url, init) {
+    var headers = new Headers(init && init.headers);
     var token =
       (window.__HERMES_SESSION_TOKEN__) ||
       params.get("token") ||
       "";
     if (token) headers.set(SESSION_HEADER, token);
-    return fetch(url, { headers: headers, credentials: "include" });
+    return fetch(url, Object.assign({}, init || {}, { headers: headers, credentials: "include" }));
   }
 
   function esc(s) {
@@ -312,36 +325,82 @@
     // --- comments ---
     var comments = data.comments || [];
     html += '<div class="section-title">Comments (' + comments.length + ")</div>";
+    html += '<div class="card">';
     if (comments.length) {
-      html += '<div class="card">';
       comments.forEach(function (c) {
         html += '<div class="comment"><span class="who">' + esc(c.author || "?") +
           "</span><span class='when'>" + fmtTs(c.created_at) + " (" + timeAgo(c.created_at) + ")</span>" +
           '<div class="cbody">' + esc(c.body) + "</div></div>";
       });
-      html += "</div>";
     } else {
-      html += '<div class="card empty">No comments.</div>';
+      html += '<div class="empty">No comments.</div>';
     }
+    // --- add-comment form ---
+    html += '<div class="commentform">' +
+      '<textarea id="kt-comment-input" rows="2" placeholder="Add a comment\u2026"></textarea>' +
+      '<button id="kt-comment-btn" type="button">Post</button>' +
+      '<span id="kt-comment-msg" class="commentmsg"></span>' +
+      "</div>";
+    html += "</div>";
 
-    // --- events ---
+    // --- events (scrollable, most recent 10) ---
     var events = data.events || [];
-    html += '<div class="section-title">Events (' + events.length + ")</div>";
+    html += '<div class="section-title">Events (latest ' + Math.min(events.length, 10) + ' of ' + events.length + ")</div>";
     if (events.length) {
-      html += '<div class="card">';
-      events.slice(0, 60).forEach(function (e) {
+      html += '<div class="card" style="padding:0"><div class="eventbox">';
+      // events are appended in chronological order; show the LAST 10.
+      events.slice(-10).forEach(function (e) {
         var pd = e.payload || "";
         html += '<div class="event"><span class="when">' + timeAgo(e.created_at) + "</span>" +
           '<span class="kind">' + esc(e.kind) + "</span>" +
           '<span class="data">' + esc(typeof pd === "string" ? pd : JSON.stringify(pd)) + "</span></div>";
       });
-      if (events.length > 60) html += '<div class="empty">… ' + (events.length - 60) + " more</div>";
-      html += "</div>";
+      html += "</div></div>";
     } else {
       html += '<div class="card empty">No events.</div>';
     }
 
     document.getElementById("content").innerHTML = html;
+
+    // ---- wire add-comment form ----
+    var cbtn = document.getElementById("kt-comment-btn");
+    var cinput = document.getElementById("kt-comment-input");
+    var cmsg = document.getElementById("kt-comment-msg");
+    if (cbtn && cinput) {
+      function postComment() {
+        var body = cinput.value.trim();
+        if (!body) return;
+        cbtn.disabled = true;
+        cmsg.textContent = "Posting\u2026";
+        authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/comments" + boardQuery, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: body, author: "dashboard" }),
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.text().then(function (t) { throw new Error("HTTP " + r.status + ": " + t.slice(0, 120)); });
+            }
+            return r.json();
+          })
+          .then(function () {
+            cinput.value = "";
+            cmsg.textContent = "Posted.";
+            // Reload detail so the new comment appears.
+            authedFetch(apiUrl).then(checkOk).then(function (d) {
+              render(d, logData);
+            }).catch(function () {});
+          })
+          .catch(function (e) {
+            cmsg.textContent = "Error: " + ((e && e.message) || e);
+          })
+          .then(function () { cbtn.disabled = false; });
+      }
+      cbtn.addEventListener("click", postComment);
+      cinput.addEventListener("keydown", function (ev) {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") postComment();
+      });
+    }
 
     // ---- fill the log (priority view) ----
     fillLog(logData);
