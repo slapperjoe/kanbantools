@@ -1,36 +1,51 @@
 /**
  * Kanban Tools — webui entry.
  *
- * Applies the two toggleable features, each gated on its plugin config
- * (read from /api/plugins/kanban-tools/config):
+ * Two responsibilities:
+ *   1. A visible settings tab ("/kanban-tools") where the two toggleable
+ *      features can be switched on/off and persist via the plugin API.
+ *   2. Runtime DOM injection that applies the features per config on every
+ *      page (wide scrollbars, popout task button), so the toggles take
+ *      effect immediately.
  *
- *   1. wideScrollbars   — widen the dashboard scrollbars to 16px.
- *   2. popoutTaskButton — add an "open in new tab" button to the kanban task
- *                         drawer's header (deep link ?task_id= + ?board=).
- *
- * Because both features are driven by the plugin's own config, toggling them
- * in the desktop Plugins page takes effect on the next page load (and, for
- * the drawer button, live via a MutationObserver). This is the webui half;
- * the desktop half lives in ../desktop/plugin.js.
+ * Config is read/written through /api/plugins/kanban-tools/config
+ * (plugin_api.py). The desktop Plugins page writes the same
+ * plugins.entries.kanban-tools.settings store, so both surfaces agree.
  */
 (function () {
-  var CONFIG_URL = "/api/plugins/kanban-tools/config";
-  var PLUGIN = "kanban-tools";
-  var registered = false;
+  "use strict";
 
-  // ---- wide-scrollbar CSS (same rules the desktop/web scrollbar commits shipped) ----
+  var SDK = window.__HERMES_PLUGIN_SDK__;
+  if (!SDK) return;
+
+  var CONFIG_URL = "api/plugins/kanban-tools/config";
+  var PLUGIN = "kanban-tools";
+
+  var React = SDK.React;
+  var h = React.createElement;
+  var hooks = SDK.hooks || {};
+  var components = SDK.components || {};
+  var fetchConfig = (SDK && SDK.fetchJSON)
+    ? SDK.fetchJSON.bind(SDK)
+    : function (url) {
+        return fetch(url).then(function (r) {
+          if (!r.ok) throw new Error("config fetch " + r.status);
+          return r.json();
+        });
+      };
+
+  // ---- feature application (shared by boot + settings page) ----
+
+  var styleTag = null;
+  var popoutStyleTag = null;
+  var observer = null;
+
   var WIDE_SCROLLBAR_CSS = [
     "* { scrollbar-width: auto; }",
     "*::-webkit-scrollbar { width: 1rem; height: 1rem; }",
     ".hermes-kanban *::-webkit-scrollbar { width: 1rem; height: 1rem; }",
   ].join("\n");
 
-  var styleTag = null;
-  var popoutStyleTag = null;
-
-  // Popout button styling (the kanban drawer's own bundle may or may not
-  // ship these rules depending on version; we inject them so the button
-  // always renders correctly).
   var POPOUT_BUTTON_CSS = [
     ".hermes-kanban-drawer-actions { display: flex; align-items: center; gap: 0.15rem; }",
     ".hermes-kanban-drawer-open-tab { font-size: 1rem; }",
@@ -66,11 +81,6 @@
     }
   }
 
-  // ---- popout task button ----
-  // The kanban drawer is rendered by the kanban plugin; we add our button to
-  // its header. The drawer head carries the close button (class
-  // hermes-kanban-drawer-close) inside an actions cluster; we insert before
-  // it once per drawer.
   function currentBoardSlug() {
     try {
       var b = (new URLSearchParams(window.location.search).get("board") || "").trim();
@@ -88,11 +98,13 @@
 
     var taskIdEl = drawerHead.closest(".hermes-kanban-drawer");
     var taskId = taskIdEl ? taskIdEl.getAttribute("data-task-id") : null;
-    // Fallback: read from the drawer's own state via the selected task id
-    // element if present.
     if (!taskId) {
       var tid = document.querySelector(".hermes-kanban-drawer[data-task-id]");
       if (tid) taskId = tid.getAttribute("data-task-id");
+    }
+    if (!taskId) {
+      var label = drawerHead.querySelector("span");
+      if (label && label.textContent) taskId = label.textContent.trim();
     }
     if (!taskId) return;
 
@@ -108,12 +120,13 @@
       q.set("task_id", taskId);
       var slug = currentBoardSlug();
       if (slug) q.set("board", slug);
-      var path = window.location.pathname;
-      var base = window.location.origin;
-      window.open(base + path + "?" + q.toString(), "_blank", "noopener");
+      // Open the plugin's standalone task page — a real focused task view,
+      // not the whole dashboard SPA again.
+      var base = window.__HERMES_BASE_PATH__ || "";
+      var url = base + "/dashboard-plugins/kanban-tools/dist/task.html?" + q.toString();
+      window.open(url, "_blank", "noopener");
     });
 
-    // Insert into the header actions cluster, before the close button.
     var close = drawerHead.querySelector(".hermes-kanban-drawer-close");
     if (close && close.parentNode) {
       close.parentNode.insertBefore(btn, close);
@@ -122,11 +135,8 @@
     }
   }
 
-  var observer = null;
-
   function enablePopout() {
     if (observer) return;
-    // Bootstrap for any already-mounted drawer, then watch for new ones.
     var heads = document.querySelectorAll(".hermes-kanban-drawer-head");
     heads.forEach(addPopoutButton);
     observer = new MutationObserver(function (muts) {
@@ -155,46 +165,141 @@
     });
   }
 
-  // ---- boot ----
-  function boot() {
-    // Use the SDK's auth-aware fetchJSON (injects the session token / cookie
-    // for both loopback and gated modes). Plain fetch would 401 and the
-    // features would silently stay at their defaults.
-    var SDK = window.__HERMES_PLUGIN_SDK__;
-    var fetchConfig = (SDK && SDK.fetchJSON)
-      ? SDK.fetchJSON.bind(SDK)
-      : function (url) {
-          return fetch(url).then(function (r) {
-            if (!r.ok) throw new Error("config fetch " + r.status);
-            return r.json();
-          });
-        };
+  function applyAll(cfg) {
+    var wide = cfg.wideScrollbars !== false;
+    var popout = cfg.popoutTaskButton !== false;
+    applyWideScrollbars(wide);
+    applyPopoutStyles(popout);
+    if (popout) enablePopout();
+    else disablePopout();
+  }
 
-    fetchConfig("api/plugins/kanban-tools/config")
-      .then(function (cfg) {
-        applyWideScrollbars(cfg.wideScrollbars !== false);
-        applyPopoutStyles(cfg.popoutTaskButton !== false);
-        if (cfg.popoutTaskButton !== false) enablePopout();
-        else disablePopout();
+  // ---- settings page component ----
+
+  function SettingsPage() {
+    var useState = hooks.useState;
+    var useEffect = hooks.useEffect;
+    var useCallback = hooks.useCallback;
+
+    var state = useState(null);          // current config
+    var cfg = state[0];
+    var setCfg = state[1];
+    var errState = useState(null);
+    var err = errState[0];
+    var setErr = errState[1];
+    var savingState = useState("");
+    var saving = savingState[0];
+    var setSaving = savingState[1];
+
+    useEffect(function () {
+      var alive = true;
+      fetchConfig(CONFIG_URL)
+        .then(function (c) { if (alive) { setCfg(c); applyAll(c); } })
+        .catch(function (e) { if (alive) setErr(String((e && e.message) || e)); });
+      return function () { alive = false; };
+    }, []);
+
+    function toggle(key, value) {
+      if (saving) return;
+      setErr(null);
+      setSaving(key);
+      var body = {};
+      body[key] = value;
+      fetchConfig(CONFIG_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       })
-      .catch(function (e) {
+        .then(function (c) {
+          setCfg(c);
+          applyAll(c);
+        })
+        .catch(function (e) {
+          setErr(String((e && e.message) || e));
+        })
+        .then(function () {
+          setSaving("");
+        });
+    }
+
+    var Card = components.Card || "div";
+    var CardHeader = components.CardHeader || "div";
+    var CardTitle = components.CardTitle || "div";
+    var CardContent = components.CardContent || "div";
+    var Checkbox = components.Checkbox || null;
+    var Label = components.Label || "label";
+    var Button = components.Button || "button";
+
+    function Row(props) {
+      var checked = !!(cfg && cfg[props.flag] !== false);
+      var disabled = saving === props.flag;
+      var box;
+      if (Checkbox) {
+        box = h(Checkbox, {
+          id: "kt-" + props.flag,
+          checked: checked,
+          onCheckedChange: function (v) { toggle(props.flag, !!v); },
+          disabled: disabled,
+        });
+      } else {
+        box = h("input", {
+          id: "kt-" + props.flag,
+          type: "checkbox",
+          checked: checked,
+          disabled: disabled,
+          onChange: function (e) { toggle(props.flag, e.target.checked); },
+        });
+      }
+      return h("div", { className: "flex items-start justify-between gap-4 py-3" },
+        h("div", null,
+          h(Label, { htmlFor: "kt-" + props.flag, className: "text-sm font-medium" }, props.title),
+          h("p", { className: "text-xs text-muted-foreground mt-1" }, props.desc),
+        ),
+        h("div", { className: "shrink-0 pt-0.5" }, box),
+      );
+    }
+
+    return h(Card, { className: "max-w-2xl m-4" },
+      h(CardHeader, null,
+        h(CardTitle, null, "Kanban Tools"),
+        h("p", { className: "text-sm text-muted-foreground" },
+          "Worker-crash salvage is always on. These toggles control the webui UI tweaks."),
+      ),
+      h(CardContent, null,
+        cfg === null
+          ? h("p", { className: "text-sm text-muted-foreground" }, "Loading settings\u2026")
+          : h("div", { className: "divide-y" },
+              h(Row, {
+                flag: "wideScrollbars",
+                title: "Wide scrollbars",
+                desc: "Widen dashboard scrollbars to 16px (applies on the next page load).",
+              }),
+              h(Row, {
+                flag: "popoutTaskButton",
+                title: "Open task in new tab",
+                desc: "Add an \u201copen in new tab\u201d button to the kanban task drawer header.",
+              }),
+            ),
+        err ? h("p", { className: "text-sm text-destructive mt-2" }, "Error: " + err) : null,
+      ),
+    );
+  }
+
+  // ---- boot: apply features on every page per config ----
+
+  function boot() {
+    fetchConfig(CONFIG_URL)
+      .then(function (cfg) { applyAll(cfg); })
+      .catch(function () {
         // Config unavailable (e.g. plugin disabled mid-session) — default on.
-        applyWideScrollbars(true);
-        applyPopoutStyles(true);
-        enablePopout();
+        applyAll({ wideScrollbars: true, popoutTaskButton: true });
       });
   }
 
-  // Register a no-op component so the plugin loader doesn't flag NO_REGISTER.
-  // The kanban-tools plugin is hidden-tab (manifest tab.hidden) and does its
-  // work via DOM injection, not a UI page.
-  function ensureRegistered() {
-    if (registered) return;
-    registered = true;
-    var P = window.__HERMES_PLUGINS__;
-    if (P && P.register) {
-      P.register(PLUGIN, function Noop() { return null; });
-    }
+  // Register the visible settings tab component.
+  var P = window.__HERMES_PLUGINS__;
+  if (P && P.register) {
+    P.register(PLUGIN, SettingsPage);
   }
 
   if (document.readyState === "loading") {
@@ -202,5 +307,4 @@
   } else {
     boot();
   }
-  ensureRegistered();
 })();

@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-PLUGIN_ID = "kanbantools"
+PLUGIN_ID = "kanban-tools"
 
 # The two toggleable features this plugin ships. Kept here so the webui entry
 # and the desktop half agree on the exact set (the desktop Plugins page derives

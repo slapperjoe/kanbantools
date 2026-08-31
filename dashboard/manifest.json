@@ -1,11 +1,12 @@
 {
   "name": "kanban-tools",
   "label": "Kanban Tools",
-  "description": "Kanban utilities: worker-crash salvage + toggleable UI tweaks (wide scrollbars, popout task button).",
+  "description": "Kanban utilities: worker-crash salvage + toggleable UI tweaks (wide scrollbars, open task in new tab).",
   "icon": "Wrench",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "tab": {
-    "hidden": true
+    "path": "/kanban-tools",
+    "position": "after:kanban"
   },
   "entry": "dist/tools.js",
   "api": "plugin_api.py"

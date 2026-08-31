@@ -33,28 +33,30 @@ verifies + completes. Retry cost drops from hours to minutes.
   Skips tasks already `done`/`blocked` (a later run may have finished them),
   non-git worktrees, and non-clean exits.
 
-### 2. Toggleable UI tweaks (config_schema)
+### 2. Toggleable UI tweaks (webui settings tab)
 
-Two UI features, each an independent on/off switch in the Hermes desktop
-Plugins page (Settings ▸ Plugins ▸ Kanban Tools):
+Two UI features, each an independent on/off switch in the webui **Kanban
+Tools** tab (`/kanban-tools`, positioned right after the Kanban tab):
 
 | Option | Default | Effect |
 |--------|---------|--------|
 | `wideScrollbars` | on | Widens Hermes desktop + webui scrollbars to 16px |
 | `popoutTaskButton` | on | Adds an "open in new tab" button to the kanban task drawer (opens the task in the webui dashboard) |
 
-Both are served by the plugin and applied at runtime:
-- **Webui** — `dashboard/dist/tools.js` (injected by the dashboard plugin
-  loader; hidden tab, no UI page).
-- **Desktop** — the bundled Hermes kanban plugin reads the config via the
-  `plugins.manage` RPC and applies the features in the desktop app (scrollbar
-  CSS + native popout task tab). No separate desktop plugin.
+The webui applies both features at runtime and exposes a settings page:
 
-Toggling in the Plugins page writes `plugins.entries.kanbantools.settings`
-via `plugins.manage config_set`; the feature code reads it through
-`/api/plugins/kanban-tools/config` (webui) or the `plugins.manage list` RPC
-(desktop). Requires the hermes-agent side that renders the generic per-plugin
-config panel + reads the config in the kanban plugin.
+- **Settings tab** — the plugin registers a visible **Kanban Tools** tab
+  (`/kanban-tools`, after the Kanban tab) rendered by `dashboard/dist/tools.js`.
+  Each feature has a toggle; flipping it `PUT`s
+  `/api/plugins/kanban-tools/config`, which persists
+  `plugins.entries.kanban-tools.settings` and re-applies the feature live.
+- **Runtime injection** — on every page load `dist/tools.js` reads the same
+  config and applies the features (wide scrollbars via injected CSS, popout
+  button via a MutationObserver on the kanban drawer header).
+
+The config key is `plugins.entries.kanban-tools.settings` — the plugin's
+`plugin.yaml` `config_schema` mirrors the same two keys, so the desktop
+Plugins page (where present) and the webui tab share one store.
 
 ### Layout
 
@@ -64,9 +66,9 @@ kanbantools/
   __init__.py              # register(ctx) -> ctx.register_hook("on_kanban_worker_exited", ...)
   salvage.py               # the salvage logic + hook handler
   dashboard/
-    manifest.json          # hidden-tab dashboard plugin: serves assets + mounts plugin_api.py
-    plugin_api.py          # /config (GET/PUT) + /dashboard-url (GET)
-    dist/tools.js          # webui: applies the two features per config
+    manifest.json          # visible-tab dashboard plugin (/kanban-tools settings page)
+    plugin_api.py          # /config (GET/PUT) + /dashboard-url (GET); reads plugins.entries.kanban-tools.settings
+    dist/tools.js          # webui: settings page component + applies the two features per config
 ```
 
 ## Manual / dry-run
