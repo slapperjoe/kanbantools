@@ -186,6 +186,23 @@
   .commentform button:disabled { opacity: .5; cursor: default; }
   .commentmsg { font-size: 11.5px; color: var(--muted); align-self: center; white-space: nowrap; }
 
+  /* ---- modal (reassign, etc.) ---- */
+  .modal-root { position: fixed; inset: 0; z-index: 50; }
+  .modal-root[hidden] { display: none; }
+  .modal-backdrop { position: absolute; inset: 0;
+    background: color-mix(in srgb, var(--bg) 55%, rgba(0, 0, 0, .35)); }
+  .modal { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(460px, calc(100% - 32px)); max-height: calc(100% - 48px); overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .4); }
+  .modal h2 { font-size: 15px; margin: 0 0 4px; }
+  .modal .modal-sub { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .modal label.check { display: flex; gap: 8px; align-items: center; font-size: 13px;
+    margin-top: 12px; cursor: pointer; }
+  .modal label.check input { accent-color: var(--accent); }
+
   .diag { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
     background: color-mix(in srgb, var(--warn) 8%, var(--bg)); border-radius: calc(var(--radius) - 2px);
     padding: 10px 12px; margin-bottom: 8px; }
@@ -270,6 +287,27 @@
     <span class="crumb" id="boardcrumb"></span>
   </div>
   <div id="content"><div class="loading">Loading…</div></div>
+</div>
+
+<!-- Reassign modal (populated + toggled by openReassignModal / closeReassignModal). -->
+<div class="modal-root" id="kt-modal" hidden role="dialog" aria-modal="true" aria-labelledby="kt-reassign-title">
+  <div class="modal-backdrop"></div>
+  <div class="modal">
+    <h2 id="kt-reassign-title">Reassign task</h2>
+    <p class="modal-sub">Move this task to a different worker profile.</p>
+    <div class="field">
+      <label for="kt-reassign-profile">Profile</label>
+      <select id="kt-reassign-profile"></select>
+    </div>
+    <label class="check" for="kt-reassign-reclaim">
+      <input type="checkbox" id="kt-reassign-reclaim">
+      <span>Reclaim the current worker first (kill its run, then reassign)</span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn" id="kt-reassign-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="kt-reassign-ok" type="button">Reassign</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -367,6 +405,15 @@
   document.getElementById("crumb").textContent = taskId;
   document.getElementById("boardcrumb").textContent = board ? ("board: " + board) : "";
 
+  // Bind the reassign modal controls once (the modal DOM is static).
+  (function bindModalOnce() {
+    var rok = document.getElementById("kt-reassign-ok");
+    if (rok) rok.addEventListener("click", doReassign);
+    var roc = document.getElementById("kt-reassign-cancel");
+    if (roc) roc.addEventListener("click", closeReassignModal);
+    bindReassignModal();
+  })();
+
   function loadAll() {
     return Promise.all([
       authedFetch(apiUrl).then(checkOk),
@@ -452,17 +499,69 @@
     if (summary === null) return;
     doStatus("done", { summary: summary });
   }
-  function promptReassign() {
-    var names = profiles.map(function (p) { return p.name; });
-    if (!names.length) names = assignees;
+  // ---- reassign modal ----
+  var reassignOpen = false;
+  function reassignOptions() {
+    var names = profiles.map(function (p) { return p.name; }).filter(Boolean);
+    if (!names.length) names = assignees.slice();
+    // De-dupe, keep order.
+    return names.filter(function (n, i) { return names.indexOf(n) === i; });
+  }
+  function openReassignModal() {
+    var names = reassignOptions();
     if (!names.length) { setMsg("No profiles available to reassign to.", "error"); return; }
-    var v = window.prompt("Reassign to profile (" + names.join(", ") + "):");
+    var root = document.getElementById("kt-modal");
+    if (!root) return;
+    var sel = document.getElementById("kt-reassign-profile");
+    // (Re)build the dropdown from the current profile list.
+    var current = (state.task && state.task.assignee) || "";
+    sel.innerHTML = '<option value="" disabled>' + esc("Select a profile\u2026") + "</option>" +
+      names.map(function (n) {
+        return "<option value=\"" + esc(n) + "\"" + (n === current ? " selected" : "") + ">" + esc(n) + "</option>";
+      }).join("");
+    if (!current || names.indexOf(current) === -1) sel.selectedIndex = 0;
+    document.getElementById("kt-reassign-reclaim").checked = false;
+    root.hidden = false;
+    reassignOpen = true;
+    sel.focus();
+  }
+  function closeReassignModal() {
+    var root = document.getElementById("kt-modal");
+    if (root) root.hidden = true;
+    reassignOpen = false;
+  }
+  function doReassign() {
+    var sel = document.getElementById("kt-reassign-profile");
+    var v = sel && sel.value;
     if (!v) return;
-    var reclaim = window.confirm("Reclaim current worker first? (Cancel = leave the claim)");
+    var reclaim = !!(document.getElementById("kt-reassign-reclaim").checked);
     post("/tasks/" + encodeURIComponent(taskId) + "/reassign" + boardQuery,
       { profile: v, reclaim_first: reclaim })
-      .then(function () { setMsg("Reassigned to " + v + ".", "ok"); return reload(); })
+      .then(function () { closeReassignModal(); setMsg("Reassigned to " + v + ".", "ok"); return reload(); })
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
+  }
+  function bindReassignModal() {
+    var root = document.getElementById("kt-modal");
+    if (!root) return;
+    root.addEventListener("click", function (e) {
+      if (e.target === root || e.target.classList.contains("modal-backdrop")) closeReassignModal();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (!reassignOpen) return;
+      if (e.key === "Escape") { closeReassignModal(); return; }
+      if (e.key === "Enter" && e.target.tagName !== "SELECT") { doReassign(); return; }
+      if (e.key === "Tab") {
+        // Minimal focus trap: keep Tab within the modal's focusables.
+        var f = Array.prototype.filter.call(
+          root.querySelectorAll("select, input, button"),
+          function (el) { return !el.disabled && el.offsetParent !== null; }
+        );
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
   }
   function doReclaim() {
     post("/tasks/" + encodeURIComponent(taskId) + "/reclaim" + boardQuery, { reason: "reclaimed from task page" })
@@ -731,37 +830,55 @@
   }
 
   // ---- render ----
+  // Detailed tooltips for every action button, keyed by id.
+  var ACTION_TIPS = {
+    "kt-act-specify": "Flesh out this triage task with the auxiliary LLM and promote it to the todo column (hermes kanban specify).",
+    "kt-act-decompose": "Break this triage task into a graph of child tasks via the auxiliary LLM, routed to specialist profiles (hermes kanban decompose). May take minutes.",
+    "kt-act-ready": "Move the task to the ready column so a worker will pick it up.",
+    "kt-act-block": "Move the task to blocked (asks for a block reason). It will not be scheduled until unblocked.",
+    "kt-act-review": "Move the task to the review column for a human to inspect before it is accepted.",
+    "kt-act-complete": "Mark the task done (asks for a completion summary).",
+    "kt-act-reclaim": "Release the active worker's claim on this running task (kills the current run). Use when a worker is stuck.",
+    "kt-act-archive": "Archive the completed task (moves it out of the board view).",
+    "kt-act-edit": "Edit the task's title, body, priority, assignee, and model/provider overrides.",
+    "kt-act-reassign": "Reassign the task to a different worker profile (opens a profile picker).",
+    "kt-act-estimate": "Run a rough token + complexity estimate for this task via the auxiliary model."
+  };
+  function tipBtn(id, label, cls) {
+    var tip = ACTION_TIPS[id] || "";
+    return '<button class="btn ' + (cls || "") + '" id="' + id + '" title="' + esc(tip) + '">' + esc(label) + "</button>";
+  }
   function actionButtons(task) {
     var st = task.status;
     var btns = [];
     if (st === "triage") {
-      btns.push(['<button class="btn primary" id="kt-act-specify">Specify</button>']);
-      btns.push(['<button class="btn primary" id="kt-act-decompose">Decompose</button>']);
-      btns.push(['<button class="btn" id="kt-act-ready">Make ready</button>']);
-      btns.push(['<button class="btn" id="kt-act-block">Block</button>']);
+      btns.push(tipBtn("kt-act-specify", "Specify", "primary"));
+      btns.push(tipBtn("kt-act-decompose", "Decompose", "primary"));
+      btns.push(tipBtn("kt-act-ready", "Make ready"));
+      btns.push(tipBtn("kt-act-block", "Block"));
     } else if (st === "todo" || st === "ready") {
-      btns.push(['<button class="btn primary" id="kt-act-ready">Make ready</button>']);
-      btns.push(['<button class="btn warn" id="kt-act-block">Block</button>']);
-      btns.push(['<button class="btn" id="kt-act-review">Request review</button>']);
-      btns.push(['<button class="btn ok" id="kt-act-complete">Complete</button>']);
+      btns.push(tipBtn("kt-act-ready", "Make ready", "primary"));
+      btns.push(tipBtn("kt-act-block", "Block", "warn"));
+      btns.push(tipBtn("kt-act-review", "Request review"));
+      btns.push(tipBtn("kt-act-complete", "Complete", "ok"));
     } else if (st === "running") {
-      btns.push(['<button class="btn warn" id="kt-act-reclaim">Reclaim worker</button>']);
-      btns.push(['<button class="btn warn" id="kt-act-block">Block</button>']);
-      btns.push(['<button class="btn ok" id="kt-act-complete">Complete</button>']);
+      btns.push(tipBtn("kt-act-reclaim", "Reclaim worker", "warn"));
+      btns.push(tipBtn("kt-act-block", "Block", "warn"));
+      btns.push(tipBtn("kt-act-complete", "Complete", "ok"));
     } else if (st === "blocked" || st === "scheduled") {
-      btns.push(['<button class="btn primary" id="kt-act-ready">Unblock → ready</button>']);
-      btns.push(['<button class="btn" id="kt-act-review">Request review</button>']);
+      btns.push(tipBtn("kt-act-ready", "Unblock \u2192 ready", "primary"));
+      btns.push(tipBtn("kt-act-review", "Request review"));
     } else if (st === "review") {
-      btns.push(['<button class="btn primary" id="kt-act-ready">Accept (ready)</button>']);
-      btns.push(['<button class="btn ok" id="kt-act-complete">Complete</button>']);
+      btns.push(tipBtn("kt-act-ready", "Accept (ready)", "primary"));
+      btns.push(tipBtn("kt-act-complete", "Complete", "ok"));
     } else if (st === "done") {
-      btns.push(['<button class="btn" id="kt-act-archive">Archive</button>']);
+      btns.push(tipBtn("kt-act-archive", "Archive"));
     }
     // always available
-    btns.push(['<button class="btn" id="kt-act-edit">Edit</button>']);
-    btns.push(['<button class="btn" id="kt-act-reassign">Reassign</button>']);
-    btns.push(['<button class="btn" id="kt-act-estimate">Estimate</button>']);
-    return btns.map(function (b) { return b[0]; }).join("");
+    btns.push(tipBtn("kt-act-edit", "Edit"));
+    btns.push(tipBtn("kt-act-reassign", "Reassign"));
+    btns.push(tipBtn("kt-act-estimate", "Estimate"));
+    return btns.map(function (b) { return b; }).join("");
   }
 
   function render() {
@@ -976,13 +1093,15 @@
     var sp = id("kt-act-specify"); if (sp) sp.addEventListener("click", doSpecify);
     var dc = id("kt-act-decompose"); if (dc) dc.addEventListener("click", doDecompose);
     var ed = id("kt-act-edit");   if (ed) ed.addEventListener("click", startEdit);
-    var ra = id("kt-act-reassign"); if (ra) ra.addEventListener("click", promptReassign);
+    var ra = id("kt-act-reassign"); if (ra) ra.addEventListener("click", openReassignModal);
     var es = id("kt-act-estimate"); if (es) es.addEventListener("click", doEstimate);
     // run row actions
     document.querySelectorAll("[data-inspect]").forEach(function (el) {
+      el.title = "Inspect the worker process for this run (live CPU, memory, threads via psutil).";
       el.addEventListener("click", function () { doInspectRun(parseInt(el.getAttribute("data-inspect"), 10)); });
     });
     document.querySelectorAll("[data-term]").forEach(function (el) {
+      el.title = "Terminate this run's worker process (SIGTERM then SIGKILL).";
       el.addEventListener("click", function () { doTerminateRun(parseInt(el.getAttribute("data-term"), 10)); });
     });
   }
