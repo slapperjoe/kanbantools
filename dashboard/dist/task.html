@@ -5,15 +5,77 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Task</title>
 <style>
+  /* Theme tokens follow the active dashboard theme: theme-bootstrap.js
+     (mirroring web/src/themes) writes the active theme's palette, fonts,
+     and radius onto :root inline, overriding these defaults — which match
+     the built-in `default` (Hermes Teal) theme so the page renders
+     correctly even before/without the API. The --color-* values mirror the
+     dashboard's shadcn-compat @theme block in web/src/index.css. */
   :root {
-    --bg: #0f1117; --panel: #171a23; --panel2: #1d2130;
-    --border: #2a2f42; --text: #dbe2f0; --muted: #8b93a7;
-    --accent: #5b8cff; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --background: color-mix(in srgb, #041c1c 100%, transparent);
+    --background-base: #041c1c;
+    --background-alpha: 1;
+    --midground: color-mix(in srgb, #ffe6cb 100%, transparent);
+    --midground-base: #ffe6cb;
+    --midground-alpha: 1;
+
+    --theme-font-sans: system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    --theme-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo,
+      Consolas, monospace;
+    --theme-base-size: 15px;
+    --theme-line-height: 1.55;
+    --theme-letter-spacing: 0;
+    --theme-radius: 0.5rem;
+    --theme-spacing-mul: 1;
+
+    --color-foreground: var(--midground);
+    --color-card: color-mix(in srgb, var(--midground-base) 4%, var(--background-base));
+    --color-muted: color-mix(in srgb, var(--midground-base) 8%, var(--background-base));
+    /* Dashboard maps this through --color-text-secondary (midground 80%);
+       72% reads a touch stronger for this page's small uppercase labels. */
+    --color-muted-foreground: color-mix(in srgb, var(--midground-base) 72%, var(--background-base));
+    --color-destructive: #fb2c36;
+    --color-success: #4ade80;
+    --color-warning: #ffbd38;
+    --color-border: color-mix(in srgb, var(--midground-base) 15%, transparent);
+    --color-input: color-mix(in srgb, var(--midground-base) 15%, transparent);
+    --color-ring: var(--midground);
+
+    /* Page-local roles, derived from the theme tokens. */
+    --bg: var(--background-base);
+    --panel: var(--color-card);
+    --panel2: var(--color-muted);
+    --border: var(--color-border);
+    --border-strong: color-mix(in srgb, var(--midground-base) 35%, transparent);
+    --text: var(--color-foreground);
+    --muted: var(--color-muted-foreground);
+    --accent: var(--midground-base);
+    --on-accent: var(--background-base);
+    --ok: var(--color-success);
+    --warn: var(--color-warning);
+    --err: var(--color-destructive);
+    /* Semantic TEXT variants: the raw success/warning/destructive hues are
+       pastel and wash out on light themes (nous-blue), so in light mode
+       theme-bootstrap.js flips [data-theme-mode] and we mix them toward
+       black for readable text. Borders/tints keep the raw hues. */
+    --ok-text: var(--ok);
+    --warn-text: var(--warn);
+    --err-text: var(--err);
+    --mono: var(--theme-font-mono);
+    --radius: var(--theme-radius);
+  }
+  html[data-theme-mode="light"] {
+    --ok-text: color-mix(in srgb, var(--ok) 55%, black);
+    --warn-text: color-mix(in srgb, var(--warn) 55%, black);
+    --err-text: color-mix(in srgb, var(--err) 55%, black);
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+         font-family: var(--theme-font-sans);
+         font-size: var(--theme-base-size);
+         line-height: var(--theme-line-height);
+         letter-spacing: var(--theme-letter-spacing); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .wrap { max-width: 1040px; margin: 0 auto; padding: 20px; }
@@ -24,17 +86,17 @@
   .topbar .crumb b { color: var(--text); font-weight: 600; }
 
   .card { background: var(--panel); border: 1px solid var(--border);
-          border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
+          border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; }
   h1 { font-size: 19px; margin: 0 0 4px; word-break: break-word; }
   .task-id { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
 
   .badges { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
   .badge { font-size: 11.5px; padding: 2px 9px; border-radius: 999px;
-           border: 1px solid var(--border); color: var(--muted);
+           border: 1px solid var(--border-strong); color: var(--muted);
            font-weight: 600; letter-spacing: .02em; }
-  .badge.status { color: var(--accent); border-color: #33508a; }
-  .badge.assignee { color: #c4a5ff; border-color: #5b3f8f; }
-  .badge.board { color: #7fd1ff; border-color: #2c6d96; }
+  .badge.status { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .badge.assignee { color: var(--text); }
+  .badge.board { color: var(--text); }
 
   .body { margin-top: 10px; white-space: pre-wrap; word-break: break-word;
           color: var(--text); font-size: 13.5px; }
@@ -55,13 +117,13 @@
   code, .mono { font-family: var(--mono); }
 
   .pill { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
-          font-weight: 600; }
-  .pill.running { color: var(--warn); border: 1px solid #6b5527; }
-  .pill.done { color: var(--ok); border: 1px solid #2f6b45; }
-  .pill.blocked { color: var(--err); border: 1px solid #7a3232; }
-  .pill.ready, .pill.todo, .pill.triage { color: #7fd1ff; border: 1px solid #2c6d96; }
-  .pill.review { color: #c4a5ff; border: 1px solid #5b3f8f; }
-  .pill.crashed { color: var(--err); border: 1px solid #7a3232; }
+          font-weight: 600; background: var(--panel2); }
+  .pill.running { color: var(--warn-text); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
+  .pill.done { color: var(--ok-text); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); }
+  .pill.blocked { color: var(--err-text); border: 1px solid color-mix(in srgb, var(--err) 45%, transparent); }
+  .pill.ready, .pill.todo, .pill.triage { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+  .pill.review { color: var(--text); border: 1px solid var(--border-strong); }
+  .pill.crashed { color: var(--err-text); border: 1px solid color-mix(in srgb, var(--err) 45%, transparent); }
 
   .comment { border-left: 2px solid var(--border); padding: 6px 12px; margin: 8px 0; }
   .comment .who { font-size: 12px; color: var(--accent); font-weight: 600; }
@@ -70,23 +132,44 @@
 
   .logbox { max-height: 70vh; overflow-y: auto; padding: 12px 14px;
             font-family: var(--mono); font-size: 12px; line-height: 1.55;
-            white-space: pre-wrap; word-break: break-word; color: #c6cedc;
-            background: #0a0c12; border-radius: 0 0 10px 10px; }
+            white-space: pre-wrap; word-break: break-word; color: var(--text);
+            background: color-mix(in srgb, var(--panel) 40%, var(--bg));
+            border-radius: 0 0 var(--radius) var(--radius); }
   .logbox::-webkit-scrollbar { width: 10px; }
   .logbox::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
   .logmeta { font-size: 11px; color: var(--muted); padding: 8px 14px 0; }
   .logempty { color: var(--muted); font-style: italic; padding: 12px 14px; }
 
-  details.collapsed { margin-bottom: 14px; }
-  details.collapsed summary { cursor: pointer; color: var(--muted); font-size: 12px;
-    text-transform: uppercase; letter-spacing: .08em; padding: 4px 0; user-select: none; }
-  details.collapsed summary:hover { color: var(--text); }
+  details.collapsed { border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); margin-bottom: 14px; overflow: hidden; }
+  details.collapsed > summary { cursor: pointer; list-style: none; display: flex;
+    align-items: center; gap: 10px; color: var(--text); font-size: 14px; font-weight: 600;
+    letter-spacing: .02em; padding: 12px 16px; user-select: none;
+    transition: background .12s, color .12s; }
+  details.collapsed > summary::-webkit-details-marker { display: none; }
+  details.collapsed > summary::before { content: "\25B8"; color: var(--muted);
+    font-size: 13px; flex-shrink: 0; transition: transform .15s; }
+  details.collapsed[open] > summary::before { transform: rotate(90deg); }
+  details.collapsed > summary:hover { background: var(--panel2); }
+  details.collapsed > .card { border: 0; background: transparent; border-radius: 0;
+    padding: 2px 16px 16px; margin-bottom: 0; }
+  details.collapsed > .diag { margin-left: 16px; margin-right: 16px; }
+  details.collapsed > .diag:first-of-type { margin-top: 12px; }
+  details.collapsed .kt-acc-label { margin-right: auto; }
+  details.collapsed .kt-acc-meta { color: var(--muted);
+    font-size: 12px; font-weight: 500; font-family: var(--mono); white-space: nowrap; }
+  details.collapsed .kt-log-dl { margin-left: 10px; font-size: 12px; font-weight: 600;
+    font-family: var(--mono); color: var(--muted); text-decoration: none;
+    border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); padding: 2px 8px;
+    background: var(--panel2); white-space: nowrap; }
+  details.collapsed .kt-log-dl:hover { color: var(--text); border-color: var(--accent); text-decoration: none; }
+  details.collapsed .kt-log-dl[hidden] { display: none; }
 
   .event { display: flex; gap: 10px; align-items: baseline; padding: 3px 0;
            font-size: 12.5px; }
   .event .when { color: var(--muted); font-family: var(--mono); font-size: 11.5px;
                  white-space: nowrap; }
-  .event .kind { color: #7fd1ff; font-family: var(--mono); }
+  .event .kind { color: var(--accent); font-family: var(--mono); }
   .event .data { color: var(--muted); font-size: 12px; word-break: break-word; }
 
   .eventbox { max-height: 220px; overflow-y: auto; padding: 10px 14px; }
@@ -94,26 +177,30 @@
   .commentform { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px;
                  padding-top: 10px; border-top: 1px solid var(--border); }
   .commentform textarea { flex: 1; background: var(--panel2); border: 1px solid var(--border);
-    border-radius: 8px; color: var(--text); font: 13px/1.4 system-ui, sans-serif;
+    border-radius: calc(var(--radius) - 2px); color: var(--text);
+    font-family: var(--theme-font-sans); font-size: 13px; line-height: 1.4;
     padding: 8px 10px; resize: vertical; min-height: 44px; }
   .commentform textarea:focus { outline: none; border-color: var(--accent); }
-  .commentform button { background: var(--accent); color: #fff; border: 0;
-    border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  .commentform button { background: var(--accent); color: var(--on-accent); border: 0;
+    border-radius: calc(var(--radius) - 2px); padding: 8px 14px; font-weight: 600; cursor: pointer; }
   .commentform button:disabled { opacity: .5; cursor: default; }
   .commentmsg { font-size: 11.5px; color: var(--muted); align-self: center; white-space: nowrap; }
 
-  .diag { border: 1px solid #6b5527; background: #221d0f; border-radius: 8px;
-          padding: 10px 12px; margin-bottom: 8px; }
-  .diag.error { border-color: #7a3232; background: #261416; }
+  .diag { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    background: color-mix(in srgb, var(--warn) 8%, var(--bg)); border-radius: calc(var(--radius) - 2px);
+    padding: 10px 12px; margin-bottom: 8px; }
+  .diag.error { border-color: color-mix(in srgb, var(--err) 45%, transparent);
+    background: color-mix(in srgb, var(--err) 8%, var(--bg)); }
   .diag .dt { font-weight: 700; margin-bottom: 2px; }
   .diag .dd { color: var(--muted); font-size: 12.5px; white-space: pre-wrap; }
 
-  .errbox { border: 1px solid #7a3232; background: #261416; color: var(--err);
-            padding: 12px 14px; border-radius: 8px; }
+  .errbox { border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+    background: color-mix(in srgb, var(--err) 10%, var(--bg)); color: var(--err-text);
+    padding: 12px 14px; border-radius: calc(var(--radius) - 2px); }
   .loading { color: var(--muted); }
   .linkrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .chip { font-family: var(--mono); font-size: 11.5px; padding: 1px 8px;
-          border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+          border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); color: var(--text);
           background: var(--panel2); }
   .chip:hover { border-color: var(--accent); }
 
@@ -121,22 +208,22 @@
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
              padding-top: 12px; border-top: 1px solid var(--border); }
   .btn { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-         border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 600;
+         border-radius: calc(var(--radius) - 2px); padding: 6px 12px; font-size: 12.5px; font-weight: 600;
          cursor: pointer; transition: border-color .12s, background .12s; }
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: .5; cursor: default; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .btn.primary:hover { filter: brightness(1.1); }
-  .btn.danger { border-color: #7a3232; color: var(--err); }
-  .btn.danger:hover { background: #2a1616; }
-  .btn.ok { border-color: #2f6b45; color: var(--ok); }
-  .btn.ok:hover { background: #12261a; }
-  .btn.warn { border-color: #6b5527; color: var(--warn); }
-  .btn.warn:hover { background: #241d0e; }
+  .btn.danger { border-color: color-mix(in srgb, var(--err) 45%, transparent); color: var(--err-text); }
+  .btn.danger:hover { background: color-mix(in srgb, var(--err) 10%, var(--bg)); }
+  .btn.ok { border-color: color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok-text); }
+  .btn.ok:hover { background: color-mix(in srgb, var(--ok) 10%, var(--bg)); }
+  .btn.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn-text); }
+  .btn.warn:hover { background: color-mix(in srgb, var(--warn) 10%, var(--bg)); }
 
   .actionmsg { font-size: 12px; color: var(--muted); margin-top: 8px; word-break: break-word; }
-  .actionmsg.error { color: var(--err); }
-  .actionmsg.ok { color: var(--ok); }
+  .actionmsg.error { color: var(--err-text); }
+  .actionmsg.ok { color: var(--ok-text); }
 
   /* ---- edit form ---- */
   .editgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
@@ -144,8 +231,8 @@
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   .field input, .field textarea, .field select {
     width: 100%; background: var(--panel2); border: 1px solid var(--border);
-    border-radius: 8px; color: var(--text); padding: 7px 10px;
-    font: 13px/1.4 system-ui, monospace; }
+    border-radius: calc(var(--radius) - 2px); color: var(--text); padding: 7px 10px;
+    font-family: var(--theme-font-sans); font-size: 13px; line-height: 1.4; }
   .field textarea { resize: vertical; min-height: 60px; }
   .field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--accent); }
   .editrow { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
@@ -156,7 +243,7 @@
   .att-item:last-child { border-bottom: 0; }
   .att-name { flex: 1; word-break: break-all; }
   .att-meta { color: var(--muted); font-size: 11.5px; font-family: var(--mono); white-space: nowrap; }
-  .att-del { background: transparent; border: 0; color: var(--err); cursor: pointer; font-size: 14px; }
+  .att-del { background: transparent; border: 0; color: var(--err-text); cursor: pointer; font-size: 14px; }
   .att-up { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
   .att-up input[type=file] { color: var(--muted); font-size: 12px; }
 
@@ -167,9 +254,13 @@
   .home-name { flex: 1; }
   .home-sub { font-size: 11px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border);
                cursor: pointer; background: transparent; color: var(--muted); font-weight: 600; }
-  .home-sub.on { color: var(--ok); border-color: #2f6b45; }
+  .home-sub.on { color: var(--ok-text); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
   .home-sub:hover { border-color: var(--accent); }
 </style>
+<!-- Apply the active dashboard theme (palette, fonts, radius) to this page.
+     Fails silently if the API is unreachable — the static :root defaults
+     above already match the built-in default theme. -->
+<script src="theme-bootstrap.js"></script>
 </head>
 <body>
 <div class="wrap" id="app">
@@ -253,6 +344,11 @@
   var boardQuery = board ? "&board=" + encodeURIComponent(board) : "";
   var apiUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + boardQuery;
   var logUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?tail=150000" + boardQuery;
+  // Raw log download — a plain <a href> can't set the session header, so pass
+  // the token as a query param (the dashboard auth middleware accepts ?token=).
+  var sessionToken = window.__HERMES_SESSION_TOKEN__ || params.get("token") || "";
+  var rawLogUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?raw=1" +
+    boardQuery + (sessionToken ? "&token=" + encodeURIComponent(sessionToken) : "");
 
   // Current state (loaded + mutated)
   var state = null;
@@ -264,6 +360,9 @@
   var editMode = false;
   var editDraft = null;
   var refreshTimer = null;
+  var openAcc = "details";   // which accordion section is open (exclusive)
+  var eventsShown = 10;      // how many events are currently revealed
+  var EVENTS_STEP = 10;      // reveal this many more on scroll-to-bottom
 
   document.getElementById("crumb").textContent = taskId;
   document.getElementById("boardcrumb").textContent = board ? ("board: " + board) : "";
@@ -285,6 +384,8 @@
       homeChannels = r[4].home_channels || [];
       render();
       startLogRefresh();
+      // Live "written Xs ago" timer for the log header.
+      setInterval(updateLogAge, 1000);
     });
   }
 
@@ -500,21 +601,38 @@
   }
 
   // ---- log ----
+  var lastLogMtime = null;   // epoch seconds of last write, from logData.mtime
+
+  function updateLogAge() {
+    var el = document.getElementById("log-age");
+    if (!el) return;
+    if (!lastLogMtime) { el.textContent = ""; return; }
+    el.textContent = "written " + timeAgo(lastLogMtime);
+  }
+
   function fillLog(autoScroll) {
     var box = document.getElementById("logbox");
     var metaEl = document.getElementById("log-title");
+    var dlEl = document.querySelector(".kt-log-dl");
+    var ageEl = document.getElementById("log-age");
     if (!box) return;
     if (!logData || !logData.exists) {
       box.className = "logempty";
       box.textContent = "No worker log yet (task may never have spawned a worker).";
+      lastLogMtime = null;
+      if (dlEl) dlEl.hidden = true;
+      if (ageEl) ageEl.textContent = "";
       return;
     }
+    if (dlEl) dlEl.hidden = false;
+    lastLogMtime = logData.mtime || null;
     var content = logData.content || "";
     if (metaEl) {
-      metaEl.textContent = "Log" +
-        (logData.truncated ? " (truncated, " + Math.round(logData.size_bytes / 1024) + " KB on disk)" :
-         logData.size_bytes > 0 ? " (" + Math.round(logData.size_bytes / 1024) + " KB)" : "");
+      metaEl.textContent = logData.truncated
+        ? "(truncated, " + Math.round(logData.size_bytes / 1024) + " KB on disk)"
+        : (logData.size_bytes > 0 ? "(" + Math.round(logData.size_bytes / 1024) + " KB)" : "");
     }
+    updateLogAge();
     if (!content) {
       box.className = "logempty";
       box.textContent = "Log is empty.";
@@ -535,6 +653,81 @@
       authedFetch(logUrl).then(checkOk).then(function (lg) { logData = lg; fillLog(false); })
         .catch(function () {});
     }, 10000);
+  }
+
+  function accOpen(id) {
+    return (openAcc === id) ? " open" : "";
+  }
+
+  function bindAccordions() {
+    document.querySelectorAll("details.collapsed").forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        if (d.open) {
+          openAcc = d.getAttribute("data-kt-acc");
+          // Exclusive: close every other accordion section.
+          document.querySelectorAll("details.collapsed[open]").forEach(function (o) {
+            if (o !== d) o.open = false;
+          });
+        } else if (openAcc === d.getAttribute("data-kt-acc")) {
+          // User collapsed the open section — keep it collapsed across re-renders.
+          openAcc = null;
+        }
+      });
+    });
+  }
+
+  // ---- events (newest first, progressive reveal) ----
+
+  function eventRow(e) {
+    var pd = e.payload || "";
+    return '<div class="event"><span class="when">' + timeAgo(e.created_at) + "</span>" +
+      '<span class="kind">' + esc(e.kind) + "</span>" +
+      '<span class="data">' + esc(typeof pd === "string" ? pd : JSON.stringify(pd)) + "</span></div>";
+  }
+
+  function renderEvents() {
+    var box = document.getElementById("events-box");
+    if (!box) return;
+    var events = state.events || [];
+    var shown = Math.min(eventsShown, events.length);
+    fillEventsBox(box, events, shown);
+    // Auto-fill: if the initial batch doesn't overflow the box there's no
+    // scrollbar to trigger lazy-load, so reveal more until it scrolls (or all
+    // events are shown). Keep eventsShown in sync for the header + scroll step.
+    while (shown < events.length && box.scrollHeight <= box.clientHeight) {
+      shown = Math.min(events.length, shown + EVENTS_STEP);
+      fillEventsBox(box, events, shown);
+    }
+    eventsShown = shown;
+    var title = document.getElementById("events-title");
+    if (title) title.textContent = "Events (" + shown + " shown of " + events.length + ")";
+  }
+
+  function fillEventsBox(box, events, shown) {
+    // Newest first: walk the array from the end.
+    var html = "";
+    for (var i = events.length - 1; i >= 0 && i >= events.length - shown; i--) {
+      html += eventRow(events[i]);
+    }
+    box.innerHTML = html;
+  }
+
+  function bindEventsScroll() {
+    var box = document.getElementById("events-box");
+    if (!box) return;
+    box.onscroll = function () {
+      var events = state.events || [];
+      if (eventsShown >= events.length) return;
+      // Near bottom (within 30px): reveal another page. New rows are appended
+      // at the BOTTOM (older events), so just keep the user's scroll offset —
+      // they scroll down further to reach the newly revealed rows.
+      if (box.scrollTop + box.clientHeight >= box.scrollHeight - 30) {
+        eventsShown = Math.min(events.length, eventsShown + EVENTS_STEP);
+        var prevTop = box.scrollTop;
+        renderEvents();
+        box.scrollTop = prevTop;
+      }
+    };
   }
 
   // ---- render ----
@@ -586,7 +779,7 @@
     if (board) html += '<span class="badge board">' + esc(board) + "</span>";
     if (task.priority) html += '<span class="badge">P' + esc(task.priority) + "</span>";
     if (task.model_override) html += '<span class="badge">model: ' + esc(task.model_override) + "</span>";
-    if (task.consecutive_failures) html += '<span class="badge" style="color:var(--err);border-color:#7a3232">' + esc(task.consecutive_failures) + " failures</span>";
+    if (task.consecutive_failures) html += '<span class="badge" style="color:var(--err-text);border-color:color-mix(in srgb, var(--err) 45%, transparent)">' + esc(task.consecutive_failures) + " failures</span>";
     html += "</div>";
     html += '<div class="actions">' + actionButtons(task) + "</div>";
     if (actionMsg) {
@@ -611,14 +804,8 @@
         '<button class="btn" id="kt-edit-cancel">Cancel</button></div></div>';
     }
 
-    // --- LOG (priority view) ---
-    html += '<div class="section-title" id="log-title">Log</div>';
-    html += '<div class="card" style="padding:0">';
-    html += '<div id="logbox" class="logbox"></div>';
-    html += "</div>";
-
     // --- details ---
-    html += '<details class="collapsed"><summary>Details</summary><div class="card"><div class="meta-grid">';
+    html += '<details class="collapsed" data-kt-acc="details"' + accOpen("details") + '><summary>Details</summary><div class="card"><div class="meta-grid">';
     html += meta("Created", fmtTs(task.created_at) + " (" + timeAgo(task.created_at) + ")");
     html += meta("Started", fmtTs(task.started_at));
     html += meta("Completed", fmtTs(task.completed_at));
@@ -636,16 +823,23 @@
     html += "</div></div></details>";
 
     if (task.body && task.body.trim()) {
-      html += '<details class="collapsed"><summary>Description</summary><div class="card"><div class="body">' + esc(task.body) + "</div></div></details>";
+      html += '<details class="collapsed" data-kt-acc="desc"' + accOpen("desc") + '><summary>Description</summary><div class="card"><div class="body">' + esc(task.body) + "</div></div></details>";
     }
     if (task.latest_summary || task.result) {
-      html += '<details class="collapsed"><summary>Result</summary><div class="card"><div class="body">' +
+      html += '<details class="collapsed" data-kt-acc="result"' + accOpen("result") + '><summary>Result</summary><div class="card"><div class="body">' +
         esc(task.latest_summary || task.result) + "</div></div></details>";
     }
 
+    // --- LOG (priority view) ---
+    html += '<details class="collapsed" data-kt-acc="log"' + accOpen("log") + ">";
+    html += "<summary><span class=\"kt-acc-label\">Worker log</span><span class=\"kt-acc-meta\" id=\"log-title\"></span><span class=\"kt-acc-meta\" id=\"log-age\"></span><a class=\"kt-log-dl\" href=\"" + esc(rawLogUrl) + "\" target=\"_blank\" rel=\"noopener\" title=\"Open the full on-disk worker log in a new tab\">Open raw</a></summary>";
+    html += '<div class="card" style="padding:0">';
+    html += '<div id="logbox" class="logbox"></div>';
+    html += "</div></details>";
+
     // --- attachments ---
     var atts = (state.attachments || []);
-    html += '<details class="collapsed"><summary>Attachments (' + atts.length + ")</summary>";
+    html += '<details class="collapsed" data-kt-acc="attachments"' + accOpen("attachments") + "><summary>Attachments (" + atts.length + ")</summary>";
     html += '<div class="card">';
     if (atts.length) {
       atts.forEach(function (a) {
@@ -662,7 +856,7 @@
     html += "</div></details>";
 
     // --- home channels ---
-    html += '<details class="collapsed"><summary>Notifications</summary><div class="card">';
+    html += '<details class="collapsed" data-kt-acc="notifications"' + accOpen("notifications") + "><summary>Notifications</summary><div class=\"card\">";
     if (homeChannels.length) {
       homeChannels.forEach(function (h) {
         html += '<div class="home-item"><span class="home-name">' + esc(h.platform) + (h.thread_id ? " #" + esc(h.thread_id) : "") + "</span>" +
@@ -675,7 +869,7 @@
     html += "</div></details>";
 
     // --- diagnostics ---
-    html += '<details class="collapsed"><summary>Diagnostics</summary>';
+    html += '<details class="collapsed" data-kt-acc="diagnostics"' + accOpen("diagnostics") + "><summary>Diagnostics</summary>";
     if (task.diagnostics && task.diagnostics.length) {
       task.diagnostics.forEach(function (d) {
         html += '<div class="diag' + (d.severity === "error" ? " error" : "") + '">' +
@@ -690,7 +884,7 @@
     // --- relations ---
     var links = state.links || {};
     if ((links.parents && links.parents.length) || (links.children && links.children.length)) {
-      html += '<details class="collapsed"><summary>Relations</summary><div class="card">';
+      html += '<details class="collapsed" data-kt-acc="relations"' + accOpen("relations") + "><summary>Relations</summary><div class=\"card\">";
       if (links.parents && links.parents.length) {
         html += '<div class="meta-grid"><div class="k">Parents</div><div class="linkrow">';
         links.parents.forEach(function (p) { html += linkChip(p, board); });
@@ -748,18 +942,12 @@
       '<span id="kt-comment-msg" class="commentmsg"></span>' +
       "</div></div>";
 
-    // --- events (last 10, scrollable) ---
+    // --- events (newest first, lazy-loaded on scroll) ---
     var events = state.events || [];
-    html += '<div class="section-title">Events (latest ' + Math.min(events.length, 10) + ' of ' + events.length + ")</div>";
+    var evShown = Math.min(eventsShown, events.length);
+    html += '<div class="section-title" id="events-title">Events (' + evShown + ' shown of ' + events.length + ")</div>";
     if (events.length) {
-      html += '<div class="card" style="padding:0"><div class="eventbox">';
-      events.slice(-10).forEach(function (e) {
-        var pd = e.payload || "";
-        html += '<div class="event"><span class="when">' + timeAgo(e.created_at) + "</span>" +
-          '<span class="kind">' + esc(e.kind) + "</span>" +
-          '<span class="data">' + esc(typeof pd === "string" ? pd : JSON.stringify(pd)) + "</span></div>";
-      });
-      html += "</div></div>";
+      html += '<div class="card" style="padding:0"><div class="eventbox" id="events-box"></div></div>';
     } else {
       html += '<div class="card empty">No events.</div>';
     }
@@ -768,6 +956,9 @@
 
     fillLog(true);
     if (editMode) { renderEditForm(); bindEdit(); }
+    bindAccordions();
+    renderEvents();
+    bindEventsScroll();
     bindActions();
     bindAttachments();
     bindHomeChannels();
