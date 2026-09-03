@@ -54,6 +54,14 @@
     // buttons group at the right edge next to the close button.
     ".hermes-kanban-drawer-head:has([data-kt-popout]) { justify-content: flex-start; }",
     ".hermes-kanban-drawer-open-tab { margin-left: auto; font-size: 1rem; align-self: center; }",
+    // Card popout: anchor the card so the button can sit absolutely in its
+    // top-right corner (the kanban plugin's own CSS doesn't position the card).
+    ".hermes-kanban-card { position: relative; }",
+    ".hermes-kanban-card-open-tab { position: absolute; top: 0.15rem; right: 0.15rem; z-index: 5; ",
+    "  font-size: 0.8rem; line-height: 1; padding: 3px 5px; color: var(--color-muted-foreground); ",
+    "  background: transparent; border: 0; border-radius: 4px; cursor: pointer; opacity: 0.55; ",
+    "  transition: opacity .12s, color .12s; }",
+    ".hermes-kanban-card-open-tab:hover { opacity: 1; color: var(--color-foreground); }",
   ].join("\n");
 
   function applyWideScrollbars(on) {
@@ -98,6 +106,17 @@
     }
   }
 
+  function popoutUrl(taskId) {
+    var q = new URLSearchParams();
+    q.set("task_id", taskId);
+    var slug = currentBoardSlug();
+    if (slug) q.set("board", slug);
+    // Open the plugin's standalone task page — a real focused task view,
+    // not the whole dashboard SPA again.
+    var base = window.__HERMES_BASE_PATH__ || "";
+    return base + "/dashboard-plugins/kanban-tools/dist/task.html?" + q.toString();
+  }
+
   function addPopoutButton(drawerHead) {
     if (!drawerHead || drawerHead.querySelector("[data-kt-popout]")) return;
 
@@ -121,15 +140,7 @@
     btn.setAttribute("aria-label", "Open in new tab");
     btn.textContent = "\u29c9";
     btn.addEventListener("click", function () {
-      var q = new URLSearchParams();
-      q.set("task_id", taskId);
-      var slug = currentBoardSlug();
-      if (slug) q.set("board", slug);
-      // Open the plugin's standalone task page — a real focused task view,
-      // not the whole dashboard SPA again.
-      var base = window.__HERMES_BASE_PATH__ || "";
-      var url = base + "/dashboard-plugins/kanban-tools/dist/task.html?" + q.toString();
-      window.open(url, "_blank", "noopener");
+      window.open(popoutUrl(taskId), "_blank", "noopener");
     });
 
     var close = drawerHead.querySelector(".hermes-kanban-drawer-close");
@@ -140,20 +151,64 @@
     }
   }
 
+  // Card popout: same "open in new tab" affordance, but on the board card
+  // itself (top-right corner) so a task can be popped out without opening the
+  // drawer first. The card is draggable and click-to-open, so the button
+  // must swallow mousedown (stops native drag initiation) and click (stops
+  // the card's onClick opening the drawer).
+  function addCardPopout(card) {
+    if (!card || card.querySelector("[data-kt-popout]")) return;
+    var taskId = card.getAttribute("data-task-id");
+    if (!taskId) return;
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("data-kt-popout", "1");
+    btn.setAttribute("data-kt-popout-card", "1");
+    btn.className = "hermes-kanban-card-open-tab";
+    btn.title = "Open this task in a new browser tab";
+    btn.setAttribute("aria-label", "Open in new tab");
+    btn.textContent = "\u29c9";
+    btn.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(popoutUrl(taskId), "_blank", "noopener");
+    });
+    btn.addEventListener("keydown", function (e) {
+      e.stopPropagation();
+    });
+    card.appendChild(btn);
+  }
+
   function enablePopout() {
     if (observer) return;
     var heads = document.querySelectorAll(".hermes-kanban-drawer-head");
     heads.forEach(addPopoutButton);
+    var cards = document.querySelectorAll(".hermes-kanban-card");
+    cards.forEach(addCardPopout);
     observer = new MutationObserver(function (muts) {
       for (var i = 0; i < muts.length; i++) {
         var added = muts[i].addedNodes;
         for (var j = 0; j < added.length; j++) {
           var node = added[j];
           if (node.nodeType !== 1) continue;
-          var head = node.matches && node.matches(".hermes-kanban-drawer-head")
-            ? node
-            : node.querySelector && node.querySelector(".hermes-kanban-drawer-head");
-          if (head) addPopoutButton(head);
+          if (node.matches && node.matches(".hermes-kanban-drawer-head")) {
+            addPopoutButton(node);
+            continue;
+          }
+          if (node.matches && node.matches(".hermes-kanban-card")) {
+            addCardPopout(node);
+          }
+          if (node.querySelector) {
+            var head = node.querySelector(".hermes-kanban-drawer-head");
+            if (head) addPopoutButton(head);
+            var cardList = node.querySelectorAll(".hermes-kanban-card");
+            cardList.forEach(addCardPopout);
+          }
         }
       }
     });
@@ -282,7 +337,7 @@
               h(Row, {
                 flag: "popoutTaskButton",
                 title: "Open task in new tab",
-                desc: "Add an \u201copen in new tab\u201d button to the kanban task drawer header.",
+                desc: "Add an \u201copen in new tab\u201d button to kanban task cards and the task drawer header.",
               }),
             ),
         err ? h("p", { className: "text-sm text-destructive mt-2" }, "Error: " + err) : null,

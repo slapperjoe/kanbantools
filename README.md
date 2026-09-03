@@ -41,7 +41,7 @@ Tools** tab (`/kanban-tools`, positioned right after the Kanban tab):
 | Option | Default | Effect |
 |--------|---------|--------|
 | `wideScrollbars` | on | Widens Hermes desktop + webui scrollbars to 16px |
-| `popoutTaskButton` | on | Adds an "open in new tab" button to the kanban task drawer (opens the task in the webui dashboard) |
+| `popoutTaskButton` | on | Adds an "open in new tab" button to kanban task cards (top-right corner) and the task drawer header (opens the task in the webui dashboard) |
 
 The webui applies both features at runtime and exposes a settings page:
 
@@ -52,7 +52,7 @@ The webui applies both features at runtime and exposes a settings page:
   `plugins.entries.kanban-tools.settings` and re-applies the feature live.
 - **Runtime injection** — on every page load `dist/tools.js` reads the same
   config and applies the features (wide scrollbars via injected CSS, popout
-  button via a MutationObserver on the kanban drawer header).
+  button via a MutationObserver on the kanban drawer header and board cards).
 - **Standalone task page** — the popout button opens `dist/task.html`, a
   full management view of a single task. It shows the worker log front and
   center (auto-refresh every 10s while the task is active) and matches the
