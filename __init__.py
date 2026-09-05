@@ -19,11 +19,19 @@ Three features:
    reconcile on every completion. Manual trigger: the webui "Run now".
 
 3. Webui toggles: wide scrollbars, popout task button (``dist/tools.js``).
+
+4. ``report`` (manual wave report, no hook): the "Wave report" button on
+   ``task.html`` POSTs to ``/report`` for a completed task; ``report.py``
+   then builds a single self-contained HTML report of the whole wave
+   (tree, who did it, code/docs created, tests run, what was achieved)
+   and serves it via ``GET /reports/<file>``. Generation is on-demand and
+   gated server-side on the whole wave being terminal; no plugin hook —
+   the module is only reachable through the plugin API. (See ``report.py``.)
 """
 
 from __future__ import annotations
 
-from . import reconcile, salvage
+from . import reconcile, report, salvage
 
 # ---------------------------------------------------------------------------
 # Plugin registration
