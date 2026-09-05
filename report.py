@@ -463,3 +463,118 @@ def render_html(data: Dict[str, Any]) -> str:
 
     out.append("</body>\n</html>")
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# public API: generate_report + state log
+# ---------------------------------------------------------------------------
+
+def report_filename(root: str) -> str:
+    """Deterministic, root-keyed report filename (generate-once key)."""
+    return f"wave-report-{root}.html"
+
+
+def generate_report(task_id: str, board: Optional[str] = None,
+                    force: bool = False) -> Dict[str, Any]:
+    """Collect + gate + render + persist ONE wave report. Never raises.
+
+    Gate: the whole wave (task_links component) must be in a terminal
+    status. Generate-once: deterministic filename keyed by the wave root;
+    the write is skipped if the file already exists unless *force* (the
+    escape hatch for refreshing a stale report).
+    """
+    res: Dict[str, Any] = {"ok": False, "root": None, "file": None, "path": None,
+                           "generated": False, "wave_complete": False, "pending": [],
+                           "summary": None, "error": None}
+    try:
+        wave = _collect_wave(task_id, board)
+        if not wave["tasks"]:
+            res["error"] = "task not found in any board DB"
+            _append_state(res)
+            return res
+        res["root"] = wave["root"]
+        res["file"] = report_filename(wave["root"])
+        pending = _wave_pending(wave)
+        res["pending"] = pending
+        res["wave_complete"] = not pending
+        if pending:
+            res["error"] = "wave not complete"
+            _append_state(res)
+            return res
+
+        ev = _collect_git_evidence(wave)
+        tp = tf = 0
+        summaries: List[Dict[str, Any]] = []
+        for r in wave["runs"]:
+            p, f = _parse_test_summary(r.get("summary"))
+            tp += p
+            tf += f
+            if r.get("outcome") == "completed" and r.get("summary"):
+                trow = next((t for t in wave["tasks"] if t["id"] == r["task_id"]), None)
+                summaries.append({"task_id": r["task_id"],
+                                  "title": (trow or {}).get("title", ""),
+                                  "summary": r["summary"]})
+
+        starts = [t["started_at"] for t in wave["tasks"] if t.get("started_at")]
+        ends = [t["completed_at"] for t in wave["tasks"] if t.get("completed_at")]
+        duration_h = (max(ends) - min(starts)) / 3600.0 if starts and ends else None
+        rrow = next((t for t in wave["tasks"] if t["id"] == wave["root"]), {})
+        data = {
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "root_title": rrow.get("title") or wave["root"],
+            "root_id": wave["root"],
+            "duration_h": round(duration_h, 2) if duration_h else None,
+            "tasks": [{k: t.get(k) for k in
+                       ("id", "title", "status", "assignee", "created_by",
+                        "started_at", "completed_at")}
+                      for t in wave["tasks"]],
+            "links": wave["links"],
+            "authors": wave["authors"],
+            "repos": ev["repos"],
+            "tests": {"passed": tp, "failed": tf},
+            "summaries": summaries,
+            "comments_count": wave.get("comments") or 0,
+        }
+
+        sd = _state_dir()
+        sd.mkdir(parents=True, exist_ok=True)
+        out_path = sd / res["file"]
+        if out_path.exists() and not force:
+            res.update(ok=True, path=str(out_path), generated=False)
+            res["summary"] = f"already exists ({len(wave['tasks'])} tasks)"
+            _append_state(res)
+            return res
+        out_path.write_text(render_html(data), encoding="utf-8")
+        res.update(ok=True, path=str(out_path), generated=True)
+        res["summary"] = (f"{len(wave['tasks'])} tasks, "
+                          f"{sum(r['commits'] for r in ev['repos'])} commits, "
+                          f"{tp} tests passed")
+        _append_state(res)
+        return res
+    except Exception as exc:  # never raise across the plugin API boundary
+        log.exception("kanban-tools: report generation failed")
+        res["error"] = str(exc)
+        _append_state(res)
+        return res
+
+
+def recent_reports(limit: int = 20) -> List[Dict[str, Any]]:
+    """Most recent entries of the wave-report state log (oldest first)."""
+    try:
+        with open(_state_dir() / _STATE_FILE, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d[-limit:] if isinstance(d, list) else []
+    except Exception:
+        return []
+
+
+def _append_state(entry: Dict[str, Any]) -> None:
+    entries = recent_reports()
+    entries.append(entry)
+    try:
+        sd = _state_dir()
+        sd.mkdir(parents=True, exist_ok=True)
+        with open(sd / _STATE_FILE, "w", encoding="utf-8") as fh:
+            json.dump(entries[-20:], fh, indent=2)
+    except Exception as exc:
+        log.warning("kanban-tools: report state write failed: %s", exc)

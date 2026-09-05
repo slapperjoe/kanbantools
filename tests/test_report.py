@@ -205,6 +205,43 @@ def task2_setup_and_checks(home: Path) -> None:
           any(c["author"] == "Flip Dispatcher" for c in b["commit_log"]), b["commit_log"])
 
 
+def task5_checks(db: Path) -> None:
+    """generate_report: gate, deterministic path, generate-once, state log."""
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE tasks SET status='done' WHERE id='t_z'")
+    conn.commit()
+    conn.close()
+    res = kr.generate_report("t_z", board="wave")
+    check("ok", res["ok"], res)
+    check("filename keyed by root", res["file"] == "wave-report-t_r.html", res.get("file"))
+    check("file written", res["path"] and os.path.isfile(res["path"]), res.get("path"))
+    check("generated true first time", res["generated"] is True)
+    again = kr.generate_report("t_a1", board="wave")  # different task, SAME wave
+    check("generate-once: second call skips write",
+          again["ok"] and again["generated"] is False and again["file"] == "wave-report-t_r.html",
+          again)
+    recent = kr.recent_reports()
+    check("state log", recent and recent[-1]["root"] == "t_r", recent[-1] if recent else None)
+    # incomplete wave -> not generated, pending surfaced
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE tasks SET status='running' WHERE id='t_a2'")
+    conn.commit()
+    conn.close()
+    blocked = kr.generate_report("t_z", board="wave")
+    check("incomplete wave blocked",
+          blocked["ok"] is False and blocked["wave_complete"] is False
+          and [p["id"] for p in blocked["pending"]] == ["t_a2"], blocked)
+    check("never raises on missing task",
+          isinstance(kr.generate_report("t_missing", board="wave"), dict))
+    # force regenerates
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE tasks SET status='done' WHERE id='t_a2'")
+    conn.commit()
+    conn.close()
+    forced = kr.generate_report("t_r", board="wave", force=True)
+    check("force regenerates", forced["ok"] and forced["generated"] is True, forced)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         home = Path(td) / "hermes"
@@ -214,6 +251,7 @@ def main() -> int:
         task2_setup_and_checks(home)
         task3_checks()
         task4_checks()
+        task5_checks(db)
         print("ALL PASS" if ok else "FAILURES PRESENT")
         return 0 if ok else 1
 
