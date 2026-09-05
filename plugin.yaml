@@ -17,7 +17,7 @@ config_schema:
   logDownloadButton:
     type: bool
     default: true
-    description: "Add a 'download full worker log' button to the kanban task drawer. Links to the core raw worker-log endpoint (local patch 0003); degrades to a 404 link if that endpoint is absent."
+    description: "Add a 'download full worker log' button to the kanban task drawer. Served by kanbantools' own plugin endpoint (no core patch needed); falls back to the core raw-log endpoint (local patch 0003) if the plugin route is unavailable."
   autoReconcile:
     type: bool
     default: false

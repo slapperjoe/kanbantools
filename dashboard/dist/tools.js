@@ -41,9 +41,12 @@
   var logStyleTag = null;
   var observer = null;
   var logObserver = null;
-  // One-time probe result for the core raw worker-log endpoint (local patch
-  // 0003): null = unchecked, true = endpoint present, false = absent.
+  // One-time probe result for the raw worker-log endpoint: null = unchecked,
+  // true = an endpoint exists, false = none (plugin route AND core's).
   var logEndpointPresent = null;
+  // Which endpoint the probe found: "plugin" (kanbantools' own route,
+  // self-contained) or "core" (local patch 0003's endpoint, fallback).
+  var logEndpointSource = "plugin";
   var logEndpointProbed = false;
 
   var WIDE_SCROLLBAR_CSS = [
@@ -70,13 +73,12 @@
     ".hermes-kanban-card-open-tab:hover { opacity: 1; color: var(--color-foreground); }",
   ].join("\n");
 
-  // "Download full worker log" button (drawer head). Requires the core
-  // kanban worker-log endpoint with raw=true (local patch 0003). The two
-  // halves can't ship as one artifact (the endpoint is core plumbing a
-  // plugin can't provide), so the frontend keeps them in lock-step: a
-  // one-time probe below detects whether the route exists, and the button
-  // self-hides when it doesn't — no dead 404 link after a core update
-  // that drops patch 0003.
+  // "Download full worker log" button (drawer head). Backed by kanbantools'
+  // OWN raw-log endpoint (dashboard/plugin_api.py) — self-contained, works
+  // on any core version, so local patch 0003 is no longer required. If the
+  // plugin route is gone (plugin disabled/updated) the frontend falls back
+  // to core's endpoint from patch 0003. A one-time probe detects which
+  // endpoint exists and self-hides the button only when NEITHER does.
   var LOG_DOWNLOAD_BUTTON_CSS = [
     ".hermes-kanban-drawer-head:has([data-kt-logdownload]) { justify-content: flex-start; }",
     ".hermes-kanban-drawer-log-download { margin-left: auto; font-size: 1rem; align-self: center; }",
@@ -136,42 +138,68 @@
   }
 
   function logDownloadUrl(taskId) {
-    // The core kanban plugin's raw worker-log endpoint (local patch 0003):
-    // streams current + rotated log generations as text/plain inline.
+    // Primary: kanbantools' OWN raw worker-log endpoint — self-contained,
+    // works on any core version (local patch 0003's backend is NOT
+    // required). Fallback: core's endpoint (local patch 0003), used only if
+    // the plugin route vanished (plugin disabled/updated).
     var q = new URLSearchParams();
-    q.set("raw", "true");
     var slug = currentBoardSlug();
     if (slug) q.set("board", slug);
-    // ?token= works in loopback mode (the SPA injects the session token);
-    // in gated/OAuth mode the cookie already authorizes the request.
-    var tok = null;
-    try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) { /* ignore */ }
-    if (tok) q.set("token", tok);
     var base = window.__HERMES_BASE_PATH__ || "";
-    return base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?" + q.toString();
+    var primary = base + "/api/plugins/kanban-tools/tasks/" + encodeURIComponent(taskId) + "/log";
+    if (q.toString()) primary += "?" + q.toString();
+    if (logEndpointSource === "core") {
+      var cq = new URLSearchParams();
+      cq.set("raw", "true");
+      if (slug) cq.set("board", slug);
+      var tok = null;
+      try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) { /* ignore */ }
+      if (tok) cq.set("token", tok);
+      return base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?" + cq.toString();
+    }
+    return primary;
   }
 
   function probeLogEndpoint() {
     if (logEndpointProbed) return;
     logEndpointProbed = true;
-    var q = new URLSearchParams();
-    q.set("raw", "true");
-    var tok = null;
-    try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) { /* ignore */ }
-    if (tok) q.set("token", tok);
+    // Probe kanbantools' own route first. It exists as long as the plugin
+    // is installed — independent of local patch 0003. 404 detail
+    // "task ... not found" (route present, task absent) vs FastAPI's
+    // default "Not Found" (route absent).
     var base = window.__HERMES_BASE_PATH__ || "";
-    // The probe task id does not exist. Route present (patch 0003 applied):
-    // 404 with detail "task ... not found". Route absent (patch dropped by
-    // a core update): FastAPI's default 404 "Not Found" — no "task" in it.
-    fetch(base + "/api/plugins/kanban/tasks/__kt_probe__?" + q.toString(), {
+    fetch(base + "/api/plugins/kanban-tools/tasks/__kt_probe__/log", {
       method: "GET",
       credentials: "include",
     })
       .then(function (r) {
-        if (r.status !== 404) { logEndpointPresent = true; return; }
+        if (r.status !== 404) { logEndpointPresent = true; logEndpointSource = "plugin"; return; }
         return r.json().catch(function () { return {}; }).then(function (j) {
           var d = j && typeof j.detail === "string" ? j.detail : "";
-          logEndpointPresent = d.indexOf("task") !== -1;
+          if (d.indexOf("task") !== -1) {
+            logEndpointPresent = true; logEndpointSource = "plugin";
+            return;
+          }
+          // Plugin route absent — fall back to core's endpoint (patch 0003).
+          var tok = null;
+          try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) { /* ignore */ }
+          var q = new URLSearchParams();
+          q.set("raw", "true");
+          if (tok) q.set("token", tok);
+          return fetch(base + "/api/plugins/kanban/tasks/__kt_probe__/" + "log?" + q.toString(), {
+            method: "GET",
+            credentials: "include",
+          }).then(function (r2) {
+            if (r2.status !== 404) { logEndpointPresent = true; logEndpointSource = "core"; return; }
+            return r2.json().catch(function () { return {}; }).then(function (j2) {
+              var d2 = j2 && typeof j2.detail === "string" ? j2.detail : "";
+              if (d2.indexOf("task") !== -1) {
+                logEndpointPresent = true; logEndpointSource = "core";
+              } else {
+                logEndpointPresent = false;
+              }
+            });
+          });
         });
       })
       .catch(function () { logEndpointPresent = false; })
@@ -182,7 +210,7 @@
 
   function addLogDownloadButton(drawerHead) {
     if (!drawerHead || drawerHead.querySelector("[data-kt-logdownload]")) return;
-    if (logEndpointPresent === false) return;  // backend absent — never show a dead link
+    if (logEndpointPresent === false) return;  // no endpoint at all — never show a dead link
 
     var drawer = drawerHead.closest(".hermes-kanban-drawer");
     var taskId = drawer ? drawer.getAttribute("data-task-id") : null;
@@ -593,7 +621,7 @@
                 h(Row, {
                   flag: "logDownloadButton",
                   title: "Download full worker log",
-                  desc: "Add a \u201cdownload log\u201d button to the task drawer. Streams the task's full on-disk worker log (current + rotated generations) as text in a new tab. Needs the core kanban raw-log endpoint (local patch 0003); without it the link 404s.",
+                  desc: "Add a \u201cdownload log\u201d button to the task drawer. Streams the task's full on-disk worker log (current + rotated generations) as text in a new tab. Served by kanban-tools itself — no core patch needed; falls back to the core raw-log endpoint if available.",
                 }),
               ),
           err ? h("p", { className: "text-sm text-destructive mt-2" }, "Error: " + err) : null,

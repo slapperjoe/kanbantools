@@ -28,7 +28,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -190,6 +191,136 @@ def _kt_package():
                 sys.path.remove(str(pkg_dir.parent))
             except ValueError:
                 pass
+
+
+@router.get("/tasks/{task_id}/log")
+async def get_task_log_raw(
+    task_id: str,
+    board: Optional[str] = Query(None),
+) -> StreamingResponse:
+    """Raw worker-log download — kanbantools' own copy of local patch 0003's
+    GET /api/plugins/kanban/tasks/{id}/log?raw=true (which lives in the core
+    kanban plugin and must be re-applied after each core update).
+
+    Serves the same payload: all on-disk log generations (rotated
+    ``<id>.log.N`` oldest-first, then the current ``<id>.log``) streamed as
+    a text/plain inline attachment. Reads the log files directly via
+    pre-patch core helpers (``kanban_db.worker_log_path``), so it keeps
+    working on any core version — the 0003 backend is NOT required.
+
+    Auth: standard dashboard session auth (this route is a normal plugin
+    route); no ``?token=`` escape hatch (which only patch 0003 adds to
+    ``web_server._has_valid_query_token``). The frontend's new-tab link is
+    same-origin and carries the session cookie, so the token is not needed.
+    """
+    try:
+        from hermes_cli import kanban_db
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"kanban_db unavailable: {exc}",
+        )
+
+    # Task-existence check (mirrors core's 404 detail so the frontend can
+    # fingerprint this route the same way it fingerprints core's).
+    if not _task_exists(task_id, board):
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+    log_path = kanban_db.worker_log_path(task_id, board=board)
+
+    def _rot(p: Path, gen: int) -> Path:
+        # Pre-patch core helper; fall back to the suffix convention if a
+        # future core renames it.
+        helper = getattr(kanban_db, "_rotated_log_path", None)
+        if callable(helper):
+            return Path(str(helper(p, gen)))
+        return p.with_suffix(p.suffix + f".{gen}")
+
+    # Rotated generations, oldest first; current file last (newest).
+    parts: List[Path] = []
+    gen = 1
+    while True:
+        p = _rot(log_path, gen)
+        if not p.exists():
+            break
+        parts.append(p)
+        gen += 1
+    parts.append(log_path)
+    parts = [p for p in parts if p.is_file()]
+    if not parts:
+        raise HTTPException(
+            status_code=404,
+            detail=f"task {task_id} has no worker log",
+        )
+
+    def _iter_chunks():
+        for p in parts:
+            try:
+                with open(p, "rb") as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+            except OSError:
+                continue
+
+    return StreamingResponse(
+        _iter_chunks(),
+        media_type="text/plain",
+        headers={"Content-Disposition": f'inline; filename="{task_id}.log"'},
+    )
+
+
+def _task_exists(task_id: str, board: Optional[str]) -> bool:
+    """True if *task_id* is a known task (named board first, then all).
+
+    Uses the per-board SQLite DBs directly — the dashboard loads this file
+    standalone (no package context), so ``from .salvage import`` is not
+    available; resolve the path convention via the package helper instead.
+    Never raises: an unresolvable lookup returns True and lets the log-file
+    check be the gate (a nonexistent task simply has no log files).
+    """
+    import os
+    import sqlite3
+
+    def _db_path(b: Optional[str]) -> Optional[Path]:
+        home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+        if b:
+            p = home / "kanban" / "boards" / b / "kanban.db"
+            if p.exists():
+                return p
+        p = home / "kanban" / "kanban.db"
+        return p if p.exists() else None
+
+    cands: List[str] = []
+    if board:
+        p = _db_path(board)
+        if p:
+            cands.append(str(p))
+    g = _db_path(None)
+    if g:
+        cands.append(str(g))
+    home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+    boards_root = home / "kanban" / "boards"
+    try:
+        if boards_root.is_dir():
+            cands.extend(str(q) for q in sorted(boards_root.glob("*/kanban.db")))
+    except Exception:
+        pass
+    for cand in cands:
+        try:
+            conn = sqlite3.connect(cand)
+            try:
+                if conn.execute(
+                    "SELECT 1 FROM tasks WHERE id = ?", (task_id,)
+                ).fetchone():
+                    return True
+            finally:
+                conn.close()
+        except Exception:
+            continue
+    return True  # unresolvable -> don't block on a task-existence guess
 
 
 @router.post("/reconcile")
