@@ -213,8 +213,74 @@ def main() -> int:
         task1_checks(db)
         task2_setup_and_checks(home)
         task3_checks()
+        task4_checks()
         print("ALL PASS" if ok else "FAILURES PRESENT")
         return 0 if ok else 1
+
+
+def _synthetic_data() -> Dict:
+    """Flat data contract for render_html (see plan Task 4)."""
+    return {
+        "generated_at": "2026-09-05 12:30:00",
+        "root_title": "Remove legacy API explorer <script>probe</script>",
+        "root_id": "t_r",
+        "duration_h": 1.7,
+        "tasks": [
+            {"id": "t_r", "title": "Remove legacy API explorer", "status": "done",
+             "assignee": "dashboard", "created_by": "dashboard",
+             "started_at": 100, "completed_at": 500},
+            {"id": "t_a1", "title": "Remove workspace rail", "status": "done",
+             "assignee": "lwoody-coder", "created_by": "auto-decomposer",
+             "started_at": 110, "completed_at": 400},
+            {"id": "t_a2", "title": "Remove PROJECTS view", "status": "done",
+             "assignee": "flip-dispatcher", "created_by": "auto-decomposer",
+             "started_at": 110, "completed_at": 410},
+            {"id": "t_z", "title": "Re-point unified store", "status": "done",
+             "assignee": "lwoody-coder", "created_by": "auto-decomposer",
+             "started_at": 120, "completed_at": 520},
+        ],
+        "links": [("t_r", "t_a1"), ("t_r", "t_a2"), ("t_a1", "t_z"), ("t_a2", "t_z")],
+        "authors": ["flip-dispatcher", "lwoody-coder"],
+        "repos": [
+            {"repo": "/tmp/repoA", "target": "main", "branch": "wt/t_aaaaa111",
+             "commits": 1, "loc_added": 12, "loc_removed": 3,
+             "files": ["docs/notes.md", "t_aaaaa111.txt"],
+             "docs": ["docs/notes.md"],
+             "commit_log": [{"hash": "abc1234", "author": "LWoody Coder",
+                             "email": "coder@apinox.local", "subject": "work a1"}]},
+        ],
+        "tests": {"passed": 14, "failed": 0},
+        "summaries": [{"task_id": "t_a1", "title": "Remove workspace rail",
+                       "summary": "14 passed, 0 failed"}],
+        "comments_count": 1,
+    }
+
+
+def task4_checks() -> None:
+    """Self-contained HTML rendering (no JS, no external assets, escaped)."""
+    data = _synthetic_data()
+    html = kr.render_html(data)
+    check("title present", "<title>" in html and "Wave Report" in html)
+    check("no external assets",
+          "<script src=" not in html and "<link " not in html and 'href="http' not in html)
+    check("escapes html", "&lt;script&gt;probe&lt;/script&gt;" in html)
+    check("all sections",
+          all(s in html for s in ("Children", "Who did it", "Code changes",
+                                  "Docs", "Tests", "Achieved")),
+          [s for s in ("Children", "Who did it", "Code changes", "Docs", "Tests", "Achieved")
+           if s not in html])
+    check("no javascript at all", "<script" not in html)
+    check("tree depth: t_z nested under t_a1",
+          html.find("t_a1") < html.find("t_z"))
+    check("test badge", "14 passed" in html and "0 failed" in html)
+    check("achievement quote", "14 passed, 0 failed" in html)
+    check("git author listed", "LWoody Coder" in html)
+    check("repo + LOC", "wt/t_aaaaa111" in html and "+12" in html and "-3" in html)
+    # empty-state rendering must not blow up
+    bare = dict(data, repos=[], docs=None, summaries=[])
+    bare = {**bare, "tasks": data["tasks"][:1], "links": [], "authors": []}
+    html2 = kr.render_html(bare)
+    check("empty state renders", "Wave Report" in html2 and "none" in html2)
 
 
 def task3_checks() -> None:

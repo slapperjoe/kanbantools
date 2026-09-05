@@ -273,3 +273,193 @@ def _collect_git_evidence(wave: Dict[str, Any]) -> Dict[str, Any]:
         agg["commit_log"] = agg["commit_log"][:50]
         out.append(agg)
     return {"repos": out}
+
+_esc = lambda s: (str(s).replace("&", "&amp;").replace("<", "&lt;")
+                  .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+_CSS = """
+:root { --bg: #0f1115; --card: #161a22; --line: #262c38; --tx: #d7dce5;
+        --dim: #8b94a7; --acc: #5aa9ff; --ok: #3fb950; --bad: #f85149; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--tx); margin: 0;
+       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       padding: 24px; max-width: 960px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 28px 0 8px; color: var(--acc); text-transform: uppercase;
+     letter-spacing: 0.06em; }
+.meta { color: var(--dim); font-size: 13px; margin-bottom: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+        padding: 12px 14px; margin: 8px 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line);
+         font-size: 13px; }
+th { color: var(--dim); font-weight: 600; }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              font-size: 12px; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
+         font-weight: 600; }
+.badge.ok { background: rgba(63,185,80,0.15); color: var(--ok); }
+.badge.bad { background: rgba(248,81,73,0.15); color: var(--bad); }
+.tree li { margin: 2px 0 2px 20px; list-style: none; }
+.tree > li { margin-left: 0; }
+.tid { color: var(--dim); font-size: 11px; margin-left: 6px; }
+details { margin: 6px 0; }
+summary { cursor: pointer; color: var(--acc); font-size: 13px; }
+blockquote { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--acc);
+             background: var(--card); border-radius: 0 6px 6px 0; }
+blockquote .who { color: var(--dim); font-size: 12px; display: block; margin-bottom: 2px; }
+.none { color: var(--dim); font-style: italic; }
+ul { margin: 4px 0; padding-left: 20px; }
+"""
+
+
+def _tree_html(root: str, tasks: List[Dict[str, Any]],
+               links: List) -> str:
+    """BFS from *root* over directed parent->child links; depth = indent.
+    A node renders once (first visit wins); unresolvable nodes list flat
+    under the root."""
+    by_id = {t["id"]: t for t in tasks}
+    children: Dict[str, List[str]] = {}
+    for p, c in links:
+        children.setdefault(p, []).append(c)
+    lines = []
+    visited: set = set()
+    stack: List[tuple] = [(root, 0)]
+    while stack:
+        tid, depth = stack.pop(0)
+        if tid in visited:
+            continue
+        visited.add(tid)
+        t = by_id.get(tid)
+        label = _esc(t["title"] if t else tid)
+        mark = "" if t is None else (
+            f' <span class="badge ok">done</span>' if t["status"] in ("done", "archived")
+            else f' <span class="badge bad">{_esc(t["status"])}</span>')
+        lines.append(
+            f'{"  " * depth}<li>{label}'
+            f'<span class="tid mono">{_esc(tid)}</span>{mark}</li>')
+        for c in children.get(tid, []):
+            stack.append((c, depth + 1))
+    for tid in sorted(by_id):
+        if tid not in visited and tid != root:
+            lines.append(f'<li>{_esc(by_id[tid]["title"])}'
+                         f'<span class="tid mono">{_esc(tid)}</span></li>')
+    return "\n".join(lines)
+
+
+def render_html(data: Dict[str, Any]) -> str:
+    """Render the wave report as ONE self-contained HTML document.
+
+    No JavaScript, no external assets: inline CSS + <details> only. Every
+    interpolated value passes through _esc."""
+    tasks: List[Dict[str, Any]] = data.get("tasks") or []
+    repos: List[Dict[str, Any]] = data.get("repos") or []
+    links: List = data.get("links") or []
+    tests = data.get("tests") or {"passed": 0, "failed": 0}
+    summaries: List[Dict[str, Any]] = data.get("summaries") or []
+    root = data.get("root_id") or ""
+    title = data.get("root_title") or root
+
+    out: List[str] = []
+    out.append('<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">')
+    out.append(f'<title>Wave Report &mdash; {_esc(title)}</title>')
+    out.append(f"<style>{_CSS}</style>\n</head>\n<body>")
+
+    # header
+    n_tasks = len(tasks)
+    dur = data.get("duration_h")
+    dur_txt = f"{float(dur):.1f} h" if dur not in (None, "") else "n/a"
+    out.append(f"<h1>Wave Report &mdash; {_esc(title)}</h1>")
+    out.append('<div class="meta">root <span class="mono">'
+               f"{_esc(root)}</span> &middot; generated {_esc(data.get('generated_at', 'n/a'))}"
+               f" &middot; duration {dur_txt} &middot; {n_tasks} task(s)"
+               f" &middot; {int(data.get('comments_count') or 0)} comment(s)</div>")
+
+    # Children
+    out.append("<h2>Children</h2><ul class=\"tree\">")
+    if n_tasks <= 1:
+        out.append('<li class="none">none</li>')
+    else:
+        out.append(_tree_html(root, tasks, links))
+    out.append("</ul>")
+
+    # Who did it
+    out.append("<h2>Who did it</h2><div class=\"card\"><table>")
+    out.append("<tr><th>Task</th><th>Assignee</th><th>Created by</th></tr>")
+    for t in tasks:
+        out.append(f"<tr><td>{_esc(t.get('title') or t.get('id'))}</td>"
+                   f"<td>{_esc(t.get('assignee') or '&mdash;')}</td>"
+                   f"<td>{_esc(t.get('created_by') or '&mdash;')}</td></tr>")
+    out.append("</table></div>")
+    git_authors = sorted({c["author"] for r in repos for c in r.get("commit_log", [])
+                          if c.get("author")})
+    if git_authors:
+        out.append("<div class=\"card\">Git commit authors: "
+                   + ", ".join(f"<code>{_esc(a)}</code>" for a in git_authors)
+                   + "</div>")
+    profiles = sorted(data.get("authors") or [])
+    if profiles:
+        out.append("<div class=\"card\">Worker profiles: "
+                   + ", ".join(f"<code>{_esc(p)}</code>" for p in profiles)
+                   + "</div>")
+
+    # Code changes
+    out.append("<h2>Code changes</h2>")
+    if not repos:
+        out.append('<div class="none">none</div>')
+    for r in repos:
+        out.append('<div class="card">')
+        out.append(f'<div class="mono">{_esc(r.get("repo"))}'
+                   f' &rarr; branch <code>{_esc(r.get("branch") or "n/a")}</code></div>')
+        out.append(f'<div class="meta">{r.get("commits", 0)} commit(s) &middot; '
+                   f'<span class="badge ok">+{r.get("loc_added", 0)}</span> '
+                   f'<span class="badge bad">-{r.get("loc_removed", 0)}</span> &middot; '
+                   f'{len(r.get("files", []))} file(s)</div>')
+        cl = r.get("commit_log") or []
+        if cl:
+            out.append("<table><tr><th>Hash</th><th>Author</th><th>Subject</th></tr>")
+            for c in cl:
+                out.append(f"<tr><td class=\"mono\">{_esc(c.get('hash'))}</td>"
+                           f"<td>{_esc(c.get('author'))}</td>"
+                           f"<td>{_esc(c.get('subject'))}</td></tr>")
+            out.append("</table>")
+        files = r.get("files") or []
+        if files:
+            out.append(f"<details><summary>{len(files)} file(s)</summary><ul>")
+            out.extend(f'<li class="mono">{_esc(f)}</li>' for f in files)
+            out.append("</ul></details>")
+        out.append("</div>")
+
+    # Docs
+    docs = sorted({f for r in repos for f in (r.get("docs") or [])})
+    out.append("<h2>Docs</h2>")
+    if docs:
+        out.append("<ul>")
+        out.extend(f'<li class="mono">{_esc(d)}</li>' for d in docs)
+        out.append("</ul>")
+    else:
+        out.append('<div class="none">none</div>')
+
+    # Tests
+    out.append("<h2>Tests</h2><div class=\"card\">")
+    cls = "ok" if int(tests.get("failed") or 0) == 0 else "bad"
+    out.append(f'<span class="badge {cls}">{int(tests.get("passed") or 0)} passed / '
+               f"{int(tests.get('failed') or 0)} failed</span></div>")
+
+    # Achieved
+    out.append("<h2>Achieved</h2>")
+    if summaries:
+        for s in summaries:
+            out.append(f'<blockquote><span class="who">{_esc(s.get("title") or s.get("task_id"))}'
+                       f'</span>{_esc(s.get("summary"))}</blockquote>')
+    else:
+        if tasks:
+            for t in tasks:
+                out.append(f"<blockquote><span class=\"who\">{_esc(t.get('title'))}</span>"
+                           f"{_esc(t.get('title'))}</blockquote>")
+        else:
+            out.append('<div class="none">none</div>')
+
+    out.append("</body>\n</html>")
+    return "\n".join(out)
