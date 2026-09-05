@@ -41,6 +41,10 @@
   var logStyleTag = null;
   var observer = null;
   var logObserver = null;
+  // One-time probe result for the core raw worker-log endpoint (local patch
+  // 0003): null = unchecked, true = endpoint present, false = absent.
+  var logEndpointPresent = null;
+  var logEndpointProbed = false;
 
   var WIDE_SCROLLBAR_CSS = [
     "* { scrollbar-width: auto; }",
@@ -67,8 +71,12 @@
   ].join("\n");
 
   // "Download full worker log" button (drawer head). Requires the core
-  // kanban worker-log endpoint with raw=true (local patch 0003); if the
-  // endpoint is absent the link just 404s — the button degrades harmlessly.
+  // kanban worker-log endpoint with raw=true (local patch 0003). The two
+  // halves can't ship as one artifact (the endpoint is core plumbing a
+  // plugin can't provide), so the frontend keeps them in lock-step: a
+  // one-time probe below detects whether the route exists, and the button
+  // self-hides when it doesn't — no dead 404 link after a core update
+  // that drops patch 0003.
   var LOG_DOWNLOAD_BUTTON_CSS = [
     ".hermes-kanban-drawer-head:has([data-kt-logdownload]) { justify-content: flex-start; }",
     ".hermes-kanban-drawer-log-download { margin-left: auto; font-size: 1rem; align-self: center; }",
@@ -143,8 +151,38 @@
     return base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?" + q.toString();
   }
 
+  function probeLogEndpoint() {
+    if (logEndpointProbed) return;
+    logEndpointProbed = true;
+    var q = new URLSearchParams();
+    q.set("raw", "true");
+    var tok = null;
+    try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) { /* ignore */ }
+    if (tok) q.set("token", tok);
+    var base = window.__HERMES_BASE_PATH__ || "";
+    // The probe task id does not exist. Route present (patch 0003 applied):
+    // 404 with detail "task ... not found". Route absent (patch dropped by
+    // a core update): FastAPI's default 404 "Not Found" — no "task" in it.
+    fetch(base + "/api/plugins/kanban/tasks/__kt_probe__?" + q.toString(), {
+      method: "GET",
+      credentials: "include",
+    })
+      .then(function (r) {
+        if (r.status !== 404) { logEndpointPresent = true; return; }
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          var d = j && typeof j.detail === "string" ? j.detail : "";
+          logEndpointPresent = d.indexOf("task") !== -1;
+        });
+      })
+      .catch(function () { logEndpointPresent = false; })
+      .then(function () {
+        if (!logEndpointPresent) disableLogDownload();
+      });
+  }
+
   function addLogDownloadButton(drawerHead) {
     if (!drawerHead || drawerHead.querySelector("[data-kt-logdownload]")) return;
+    if (logEndpointPresent === false) return;  // backend absent — never show a dead link
 
     var drawer = drawerHead.closest(".hermes-kanban-drawer");
     var taskId = drawer ? drawer.getAttribute("data-task-id") : null;
@@ -179,6 +217,8 @@
 
   function enableLogDownload() {
     if (logObserver) return;
+    probeLogEndpoint();
+    if (logEndpointPresent === false) return;  // already known absent
     if (!logStyleTag) {
       logStyleTag = document.createElement("style");
       logStyleTag.setAttribute("data-hermes-kt", "log-download-button");
