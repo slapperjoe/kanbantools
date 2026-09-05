@@ -234,6 +234,33 @@
     else disablePopout();
   }
 
+  // ---- reconcile (worktree auto-cleanup) ----
+
+  var RECONCILE_URL = "api/plugins/kanban-tools/reconcile";
+  var RUNS_URL = "api/plugins/kanban-tools/reconcile/runs";
+
+  function postJSON(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          throw new Error((j && j.detail) || ("HTTP " + r.status));
+        });
+      }
+      return r.json();
+    });
+  }
+
+  function fmtRun(e) {
+    if (!e) return "\u2014";
+    var when = new Date(e.ts * 1000).toLocaleString();
+    var what = e.summary || e.skipped || e.error || "no-op";
+    return when + (e.reason ? " (" + e.reason + ")" : "") + " \u2014 " + what;
+  }
+
   // ---- settings page component ----
 
   function SettingsPage() {
@@ -250,12 +277,43 @@
     var savingState = useState("");
     var saving = savingState[0];
     var setSaving = savingState[1];
+    var repoState = useState("");        // reconcileRepoRoot input (draft)
+    var repo = repoState[0];
+    var setRepo = repoState[1];
+    var targetState = useState("");      // reconcileTargetBranch input (draft)
+    var targetDraft = targetState[0];
+    var setTarget = targetState[1];
+    var runningState = useState(false);
+    var running = runningState[0];
+    var setRunning = runningState[1];
+    var resultState = useState(null);
+    var result = resultState[0];
+    var setResult = resultState[1];
+    var runsState = useState([]);
+    var runs = runsState[0];
+    var setRuns = runsState[1];
+
+    var refreshRuns = useCallback(
+      function () {
+        fetchConfig(RUNS_URL)
+          .then(function (rs) { if (Array.isArray(rs)) setRuns(rs.slice(-5)); })
+          .catch(function () {});
+      },
+      []
+    );
 
     useEffect(function () {
       var alive = true;
       fetchConfig(CONFIG_URL)
-        .then(function (c) { if (alive) { setCfg(c); applyAll(c); } })
+        .then(function (c) {
+          if (!alive) return;
+          setCfg(c);
+          applyAll(c);
+          setRepo(c.reconcileRepoRoot || "");
+          setTarget(c.reconcileTargetBranch || "");
+        })
         .catch(function (e) { if (alive) setErr(String((e && e.message) || e)); });
+      refreshRuns();
       return function () { alive = false; };
     }, []);
 
@@ -282,6 +340,51 @@
         });
     }
 
+    function saveStrings() {
+      if (saving || !cfg) return;
+      setErr(null);
+      setSaving("strings");
+      fetchConfig(CONFIG_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reconcileRepoRoot: repo,
+          reconcileTargetBranch: targetDraft,
+        }),
+      })
+        .then(function (c) {
+          setCfg(c);
+          applyAll(c);
+        })
+        .catch(function (e) {
+          setErr(String((e && e.message) || e));
+        })
+        .then(function () {
+          setSaving("");
+        });
+    }
+
+    function runReconcile() {
+      if (running) return;
+      setErr(null);
+      setResult(null);
+      setRunning(true);
+      postJSON(RECONCILE_URL, {
+        repoRoot: repo || null,
+        targetBranch: targetDraft || null,
+      })
+        .then(function (res) {
+          setResult(res);
+          refreshRuns();
+        })
+        .catch(function (e) {
+          setErr(String((e && e.message) || e));
+        })
+        .then(function () {
+          setRunning(false);
+        });
+    }
+
     var Card = components.Card || "div";
     var CardHeader = components.CardHeader || "div";
     var CardTitle = components.CardTitle || "div";
@@ -289,6 +392,7 @@
     var Checkbox = components.Checkbox || null;
     var Label = components.Label || "label";
     var Button = components.Button || "button";
+    var Input = components.Input || "input";
 
     function Row(props) {
       var checked = !!(cfg && cfg[props.flag] !== false);
@@ -319,28 +423,110 @@
       );
     }
 
-    return h(Card, { className: "max-w-2xl m-4" },
-      h(CardHeader, null,
-        h(CardTitle, null, "Kanban Tools"),
-        h("p", { className: "text-sm text-muted-foreground" },
-          "Worker-crash salvage is always on. These toggles control the webui UI tweaks."),
+    return h("div", null,
+      h(Card, { className: "max-w-2xl m-4" },
+        h(CardHeader, null,
+          h(CardTitle, null, "Kanban Tools"),
+          h("p", { className: "text-sm text-muted-foreground" },
+            "Worker-crash salvage is always on. These toggles control the webui UI tweaks."),
+        ),
+        h(CardContent, null,
+          cfg === null
+            ? h("p", { className: "text-sm text-muted-foreground" }, "Loading settings\u2026")
+            : h("div", { className: "divide-y" },
+                h(Row, {
+                  flag: "wideScrollbars",
+                  title: "Wide scrollbars",
+                  desc: "Widen dashboard scrollbars to 16px (applies on the next page load).",
+                }),
+                h(Row, {
+                  flag: "popoutTaskButton",
+                  title: "Open task in new tab",
+                  desc: "Add an \u201copen in new tab\u201d button to kanban task cards and the task drawer header.",
+                }),
+              ),
+          err ? h("p", { className: "text-sm text-destructive mt-2" }, "Error: " + err) : null,
+        ),
       ),
-      h(CardContent, null,
-        cfg === null
-          ? h("p", { className: "text-sm text-muted-foreground" }, "Loading settings\u2026")
-          : h("div", { className: "divide-y" },
-              h(Row, {
-                flag: "wideScrollbars",
-                title: "Wide scrollbars",
-                desc: "Widen dashboard scrollbars to 16px (applies on the next page load).",
-              }),
-              h(Row, {
-                flag: "popoutTaskButton",
-                title: "Open task in new tab",
-                desc: "Add an \u201copen in new tab\u201d button to kanban task cards and the task drawer header.",
-              }),
-            ),
-        err ? h("p", { className: "text-sm text-destructive mt-2" }, "Error: " + err) : null,
+      h(Card, { className: "max-w-2xl mt-4 mb-4" },
+        h(CardHeader, null,
+          h(CardTitle, null, "Worktree reconciliation"),
+          h("p", { className: "text-sm text-muted-foreground" },
+            "Kanban worktrees are kept forever when their branches are never pushed. This prunes wt/t_* branches whose commits are already in the target branch; untracked scratch is archived first. Manual trigger + optional auto-run after each worker exits."),
+        ),
+        h(CardContent, null,
+          cfg === null
+            ? h("p", { className: "text-sm text-muted-foreground" }, "Loading\u2026")
+            : h("div", { className: "space-y-4" },
+                h(Row, {
+                  flag: "autoReconcile",
+                  title: "Auto-reconcile after each worker exits",
+                  desc: "Runs the prune pass automatically after a kanban worker exits (salvage commits first, then the prune). Skips safely when the checkout is dirty, the target is detached, or a worker is still live.",
+                }),
+                h("div", { className: "grid gap-3" },
+                  h("div", null,
+                    h(Label, { htmlFor: "kt-repo", className: "text-sm font-medium" }, "Repo root (optional)"),
+                    h("p", { className: "text-xs text-muted-foreground" },
+                      "Absolute path to the repo to reconcile. Empty = resolved from the exited task's worktree (auto runs) \u2014 required for manual \u201cRun now\u201d when no task context exists."),
+                    h(Input, {
+                      id: "kt-repo",
+                      className: "mt-1",
+                      value: repo,
+                      placeholder: "/home/mark/code/apinox",
+                      onChange: function (e) { setRepo(e.target.value); },
+                    }),
+                  ),
+                  h("div", null,
+                    h(Label, { htmlFor: "kt-target", className: "text-sm font-medium" }, "Target branch (optional)"),
+                    h("p", { className: "text-xs text-muted-foreground" },
+                      "Branch to triage against. Empty = the repo's current branch (a dirty or detached checkout makes the run skip with a reason)."),
+                    h(Input, {
+                      id: "kt-target",
+                      className: "mt-1",
+                      value: targetDraft,
+                      placeholder: "main",
+                      onChange: function (e) { setTarget(e.target.value); },
+                    }),
+                  ),
+                ),
+                h("div", { className: "flex items-center gap-3" },
+                  h(Button, {
+                    onClick: runReconcile,
+                    disabled: running,
+                  }, running ? "Running\u2026" : "Run now"),
+                  h(Button, {
+                    onClick: saveStrings,
+                    disabled: saving === "strings",
+                    variant: "secondary",
+                  }, "Save fields"),
+                  result ? h("span", { className: "text-xs text-muted-foreground" },
+                    (result.summary || result.skipped || result.error || "done")) : null,
+                ),
+                result && !result.skipped && !result.error ? h("div", { className: "text-xs space-y-1" },
+                  result.pruned_worktrees && result.pruned_worktrees.length
+                    ? h("p", { className: "text-emerald-600" },
+                        "Pruned: " + result.pruned_worktrees.join(", ")) : null,
+                  result.archived && result.archived.length
+                    ? h("p", { className: "text-muted-foreground" },
+                        "Scratch archived: " + result.archived.join(", ")) : null,
+                  result.kept && result.kept.length
+                    ? h("p", { className: "text-amber-600" },
+                        "Kept: " + result.kept.map(function (k) {
+                          return k.branch + " (" + k.why + ")";
+                        }).join("; ")) : null,
+                ) : null,
+                h("div", null,
+                  h("p", { className: "text-xs font-medium text-muted-foreground mb-1" },
+                    "Recent runs"),
+                  runs.length
+                    ? h("ul", { className: "text-xs space-y-1 text-muted-foreground" },
+                        runs.map(function (r, i) {
+                          return h("li", { key: i, className: "truncate", title: fmtRun(r) }, fmtRun(r));
+                        }))
+                    : h("p", { className: "text-xs text-muted-foreground" }, "No runs yet."),
+                ),
+              ),
+        ),
       ),
     );
   }

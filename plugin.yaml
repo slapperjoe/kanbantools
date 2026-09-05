@@ -1,6 +1,6 @@
 name: kanban-tools
-version: 1.1.0
-description: "Kanban Tools — auto-salvage crashed-worker work, plus toggleable UI tweaks (wide scrollbars, popout task button)."
+version: 1.2.0
+description: "Kanban Tools — auto-salvage crashed-worker work, auto-reconcile merged worktrees, plus toggleable UI tweaks (wide scrollbars, popout task button)."
 author: "Mark R"
 provides_hooks:
   - on_kanban_worker_exited
@@ -13,3 +13,15 @@ config_schema:
     type: bool
     default: true
     description: "Add an open-in-new-tab button to the kanban task drawer (desktop + webui)."
+  autoReconcile:
+    type: bool
+    default: false
+    description: "After each kanban worker exits, prune wt/t_* worktree branches whose commits are already patch-equivalent in the target branch (worktrees' untracked scratch is archived first). Manual trigger: the Kanban Tools tab 'Run now' button."
+  reconcileRepoRoot:
+    type: string
+    default: ""
+    description: "Repo to reconcile (absolute path). Empty = resolve from the task's worktree recorded in the kanban DB (auto runs), else this must be set for manual runs."
+  reconcileTargetBranch:
+    type: string
+    default: ""
+    description: "Branch to triage against. Empty = the repo's current branch (refused when detached). Set explicitly for multi-branch workflows."
