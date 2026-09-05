@@ -452,7 +452,7 @@
         h(CardHeader, null,
           h(CardTitle, null, "Worktree reconciliation"),
           h("p", { className: "text-sm text-muted-foreground" },
-            "Kanban worktrees are kept forever when their branches are never pushed. This prunes wt/t_* branches whose commits are already in the target branch; untracked scratch is archived first. Manual trigger + optional auto-run after each worker exits."),
+            "Kanban worktrees are kept forever when their branches are never pushed. This prunes wt/t_* branches whose commits are already in the target branch; untracked scratch is archived first. Optional auto-run at wave end, or manual trigger via \"Run now\"."),
         ),
         h(CardContent, null,
           cfg === null
@@ -460,8 +460,13 @@
             : h("div", { className: "space-y-4" },
                 h(Row, {
                   flag: "autoReconcile",
-                  title: "Auto-reconcile after each worker exits",
-                  desc: "Runs the prune pass automatically after a kanban worker exits (salvage commits first, then the prune). Skips safely when the checkout is dirty, the target is detached, or a worker is still live.",
+                  title: "Auto-reconcile at wave end",
+                  desc: "When the last task of a kanban wave (its linked task group) completes, run the prune pass on every repo the wave touched. Skips safely when the checkout is dirty, the target is detached, or a worker is still live.",
+                }),
+                h(Row, {
+                  flag: "waveEndOnly",
+                  title: "Wave end only",
+                  desc: "Fire only when the whole wave is done. Off = reconcile after every task completion (noisier; useful for boards without task links).",
                 }),
                 h("div", { className: "grid gap-3" },
                   h("div", null,

@@ -4,6 +4,7 @@ description: "Kanban Tools — auto-salvage crashed-worker work, auto-reconcile 
 author: "Mark R"
 provides_hooks:
   - on_kanban_worker_exited
+  - kanban_task_completed
 config_schema:
   wideScrollbars:
     type: bool
@@ -16,7 +17,11 @@ config_schema:
   autoReconcile:
     type: bool
     default: false
-    description: "After each kanban worker exits, prune wt/t_* worktree branches whose commits are already patch-equivalent in the target branch (worktrees' untracked scratch is archived first). Manual trigger: the Kanban Tools tab 'Run now' button."
+    description: "When a kanban wave ends (last task of a linked wave-group completes done/archived), reconcile the wave's repos: prune wt/t_* worktree branches whose commits are already patch-equivalent in the target branch (untracked scratch archived first). Manual trigger: the Kanban Tools tab 'Run now' button."
+  waveEndOnly:
+    type: bool
+    default: true
+    description: "With autoReconcile on: fire only at wave end (all tasks of the linked wave complete). Off = reconcile on every task completion (noisier; useful for single-task boards with no task_links)."
   reconcileRepoRoot:
     type: string
     default: ""

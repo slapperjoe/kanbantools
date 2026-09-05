@@ -10,7 +10,7 @@ flips a feature toggle.
 
 Routes:
   GET  /config          -> {wideScrollbars, popoutTaskButton, autoReconcile,
-                           reconcileRepoRoot, reconcileTargetBranch}
+                           waveEndOnly, reconcileRepoRoot, reconcileTargetBranch}
   PUT  /config          -> body with any subset of the above; merges onto
                            existing settings, returns the result.
   POST /reconcile       -> body {repoRoot?, targetBranch?}; runs the
@@ -40,7 +40,17 @@ PLUGIN_ID = "kanban-tools"
 # The feature toggles this plugin ships. Kept here so the webui entry and the
 # desktop half agree on the exact set (the desktop Plugins page derives its
 # toggles from plugin.yaml config_schema, which mirrors these).
-BOOL_FEATURES = ("wideScrollbars", "popoutTaskButton", "autoReconcile")
+BOOL_FEATURES = (
+    "wideScrollbars", "popoutTaskButton", "autoReconcile", "waveEndOnly",
+)
+# Per-feature defaults when the setting is unset — must match plugin.yaml
+# config_schema AND the hook-side reads (reconcile._get_settings).
+BOOL_DEFAULTS = {
+    "wideScrollbars": True,
+    "popoutTaskButton": True,
+    "autoReconcile": False,
+    "waveEndOnly": True,
+}
 # Free-form string settings, exposed to the webui settings tab. Their
 # config_schema keys in plugin.yaml carry the ``reconcile`` prefix.
 STRING_FEATURES = ("reconcileRepoRoot", "reconcileTargetBranch")
@@ -51,6 +61,7 @@ class ConfigIn(BaseModel):
     wideScrollbars: Optional[bool] = None
     popoutTaskButton: Optional[bool] = None
     autoReconcile: Optional[bool] = None
+    waveEndOnly: Optional[bool] = None
     reconcileRepoRoot: Optional[str] = None
     reconcileTargetBranch: Optional[str] = None
 
@@ -109,7 +120,9 @@ def _write_plugin_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
 
 def _current_config() -> Dict[str, Any]:
     s = _load_plugin_settings()
-    out: Dict[str, Any] = {f: bool(s.get(f, True)) for f in BOOL_FEATURES}
+    out: Dict[str, Any] = {
+        f: bool(s[f]) if f in s else BOOL_DEFAULTS[f] for f in BOOL_FEATURES
+    }
     for f in STRING_FEATURES:
         v = s.get(f)
         out[f] = v if isinstance(v, str) else ""
