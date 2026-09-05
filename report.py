@@ -132,3 +132,120 @@ def _wave_pending(wave: Dict[str, Any]) -> List[Dict[str, Any]]:
         for t in wave["tasks"]
         if t.get("status") not in _TERMINAL
     ]
+
+
+# ---------------------------------------------------------------------------
+# git evidence (per repo; reuses reconcile's git helpers)
+# ---------------------------------------------------------------------------
+
+def _merge_files(out_text: str, agg: Dict[str, Any]) -> None:
+    """De-dup file paths (order-preserving) into agg["files"]."""
+    seen = set(agg["files"])
+    for ln in (out_text or "").splitlines():
+        ln = ln.strip()
+        if ln and ln not in seen:
+            seen.add(ln)
+            agg["files"].append(ln)
+
+
+def _merge_shortstat(out_text: str, agg: Dict[str, Any]) -> None:
+    """Parse `N insertions(+)` / `M deletions(-)` from diff --shortstat."""
+    m = re.search(r"(\d+) insertion", out_text or "")
+    if m:
+        agg["loc_added"] += int(m.group(1))
+    m = re.search(r"(\d+) deletion", out_text or "")
+    if m:
+        agg["loc_removed"] += int(m.group(1))
+
+
+def _parse_commit_log(out_text: str) -> List[Dict[str, str]]:
+    """`git log --pretty=%h|%an|%ae|%s` lines -> list of dicts (max 50)."""
+    out: List[Dict[str, str]] = []
+    for line in (out_text or "").splitlines():
+        parts = line.split("|", 3)
+        if len(parts) == 4:
+            out.append({"hash": parts[0], "author": parts[1],
+                        "email": parts[2], "subject": parts[3]})
+    return out[:50]
+
+
+def _collect_git_evidence(wave: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-repo evidence for the wave. Reuses reconcile's git helpers.
+
+    For each DISTINCT repo root among the wave's worktree tasks:
+    target = the main checkout's current branch. For each wave task with a
+    worktree/branch in this repo (branch = tasks.branch_name or wt/<id>):
+
+    - ahead = `git rev-list --count target..branch`.
+    - ahead == 0 (merged or already pruned): fall back to the branch's own
+      tip history — `git log -n 50 --pretty= branch` for commit authors/
+      subjects and `git log -n 50 --name-only --pretty= branch` for files.
+      (A fast-forward merge shares SHAs with the target, so a three-dot
+      diff would show nothing — the tip history still carries the work.)
+    - ahead > 0: files = `git diff --name-only target...branch` (THREE dots
+      = symmetric difference from the merge base; two dots miscounts for
+      rebased branches), LOC = `git diff --shortstat target...branch`,
+      log = `git log -n 50 --pretty=%h|%an|%ae|%s target..branch`.
+
+    docs = touched files ending in .md or under a docs/ dir. commit_log is
+    capped at 50 entries. Never raises — a bad ref/repo yields an empty
+    (but valid) repo entry.
+    """
+    from .reconcile import _git, _repo_root_of
+
+    # Map repo root -> {target, [(branch, task_id)]}.
+    repos: Dict[str, Dict[str, Any]] = {}
+    for t in wave["tasks"]:
+        ws = t.get("workspace_path")
+        if not ws:
+            continue
+        root = _repo_root_of(str(ws))
+        if not root:
+            continue
+        r = repos.setdefault(str(root), {"target": None, "branches": []})
+        if r["target"] is None:
+            cur = _git(["branch", "--show-current"], str(root))
+            r["target"] = (cur.stdout or "").strip() or None
+        branch = t.get("branch_name") or ("wt/" + t["id"])
+        r["branches"].append((branch, t["id"]))
+
+    out: List[Dict[str, Any]] = []
+    for root, r in repos.items():
+        agg: Dict[str, Any] = {
+            "repo": root, "target": r["target"], "branch": "",
+            "commits": 0, "files": [], "loc_added": 0, "loc_removed": 0,
+            "docs": [], "commit_log": [],
+        }
+        if not r["target"]:
+            out.append(agg)
+            continue
+        for branch, _tid in r["branches"]:
+            ahead = _git(["rev-list", "--count", f"{r['target']}..{branch}"],
+                         root, timeout=30)
+            n = int((ahead.stdout or "0").strip() or 0) if ahead.returncode == 0 else 0
+            if n == 0:
+                # Merged/pruned: branch-tip history fallback.
+                lg = _git(["log", "-n", "50", "--pretty=%h|%an|%ae|%s", branch],
+                          root, timeout=30)
+                fl = _git(["log", "-n", "50", "--name-only", "--pretty=", branch],
+                          root, timeout=30)
+                agg["commits"] += len(_parse_commit_log(lg.stdout if lg.returncode == 0 else ""))
+                _merge_files(fl.stdout if fl.returncode == 0 else "", agg)
+            else:
+                diff = _git(["diff", "--name-only", f"{r['target']}...{branch}"],
+                            root, timeout=30)
+                stat = _git(["diff", "--shortstat", f"{r['target']}...{branch}"],
+                            root, timeout=30)
+                lg = _git(["log", "-n", "50", "--pretty=%h|%an|%ae|%s",
+                           f"{r['target']}..{branch}"], root, timeout=30)
+                agg["commits"] += n
+                _merge_files(diff.stdout if diff.returncode == 0 else "", agg)
+                _merge_shortstat(stat.stdout if stat.returncode == 0 else "", agg)
+            if lg.returncode == 0:
+                agg["commit_log"].extend(_parse_commit_log(lg.stdout))
+            agg["branch"] = branch
+        agg["docs"] = [f for f in agg["files"]
+                       if f.endswith(".md") or (f.split("/")[0] if "/" in f else "") == "docs"]
+        agg["commit_log"] = agg["commit_log"][:50]
+        out.append(agg)
+    return {"repos": out}
