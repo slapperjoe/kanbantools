@@ -212,8 +212,26 @@ def main() -> int:
         db = build_board(home)
         task1_checks(db)
         task2_setup_and_checks(home)
+        task3_checks()
         print("ALL PASS" if ok else "FAILURES PRESENT")
         return 0 if ok else 1
+
+
+def task3_checks() -> None:
+    """Test-result parsing from run summaries."""
+    check("parse '14 passed, 0 failed'", kr._parse_test_summary("14 passed, 0 failed") == (14, 0),
+          kr._parse_test_summary("14 passed, 0 failed"))
+    check("parse '254 tests passed across 36 files'",
+          kr._parse_test_summary("254 tests passed across 36 files") == (254, 0),
+          kr._parse_test_summary("254 tests passed across 36 files"))
+    check("parse '3 failed, 12 passed' (reversed order)",
+          kr._parse_test_summary("3 failed, 12 passed") == (12, 3),
+          kr._parse_test_summary("3 failed, 12 passed"))
+    check("parse junk -> (0,0)", kr._parse_test_summary("nope") == (0, 0))
+    check("parse None -> (0,0)", kr._parse_test_summary(None) == (0, 0))
+    check("parse embedded in prose",
+          kr._parse_test_summary("root suite green: 109 passed, 0 failed (14 files)") == (109, 0),
+          kr._parse_test_summary("root suite green: 109 passed, 0 failed (14 files)"))
 
 
 if __name__ == "__main__":

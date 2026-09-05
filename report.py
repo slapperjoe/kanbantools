@@ -169,6 +169,30 @@ def _parse_commit_log(out_text: str) -> List[Dict[str, str]]:
     return out[:50]
 
 
+_TEST_PATTERNS = [
+    re.compile(r"(\d+)\s+tests?\s+passed"),
+    re.compile(r"(\d+)\s+passed(?:,\s*(\d+)\s+failed)?"),
+    re.compile(r"(\d+)\s+failed,\s*(\d+)\s+passed"),
+]
+
+
+def _parse_test_summary(text: Optional[str]) -> tuple:
+    """Best-effort (passed, failed) from a task-run summary string."""
+    if not text:
+        return (0, 0)
+    m = _TEST_PATTERNS[0].search(text)
+    if m:
+        return (int(m.group(1)), 0)
+    m = _TEST_PATTERNS[2].search(text)
+    if m:
+        return (int(m.group(2)), int(m.group(1)))
+    m = _TEST_PATTERNS[1].search(text)
+    if m:
+        f = int(m.group(2)) if m.group(2) else 0
+        return (int(m.group(1)), f)
+    return (0, 0)
+
+
 def _collect_git_evidence(wave: Dict[str, Any]) -> Dict[str, Any]:
     """Per-repo evidence for the wave. Reuses reconcile's git helpers.
 
