@@ -38,7 +38,9 @@
 
   var styleTag = null;
   var popoutStyleTag = null;
+  var logStyleTag = null;
   var observer = null;
+  var logObserver = null;
 
   var WIDE_SCROLLBAR_CSS = [
     "* { scrollbar-width: auto; }",
@@ -62,6 +64,14 @@
     "  background: transparent; border: 0; border-radius: 4px; cursor: pointer; opacity: 0.55; ",
     "  transition: opacity .12s, color .12s; }",
     ".hermes-kanban-card-open-tab:hover { opacity: 1; color: var(--color-foreground); }",
+  ].join("\n");
+
+  // "Download full worker log" button (drawer head). Requires the core
+  // kanban worker-log endpoint with raw=true (local patch 0003); if the
+  // endpoint is absent the link just 404s — the button degrades harmlessly.
+  var LOG_DOWNLOAD_BUTTON_CSS = [
+    ".hermes-kanban-drawer-head:has([data-kt-logdownload]) { justify-content: flex-start; }",
+    ".hermes-kanban-drawer-log-download { margin-left: auto; font-size: 1rem; align-self: center; }",
   ].join("\n");
 
   function applyWideScrollbars(on) {
@@ -115,6 +125,99 @@
     // not the whole dashboard SPA again.
     var base = window.__HERMES_BASE_PATH__ || "";
     return base + "/dashboard-plugins/kanban-tools/dist/task.html?" + q.toString();
+  }
+
+  function logDownloadUrl(taskId) {
+    // The core kanban plugin's raw worker-log endpoint (local patch 0003):
+    // streams current + rotated log generations as text/plain inline.
+    var q = new URLSearchParams();
+    q.set("raw", "true");
+    var slug = currentBoardSlug();
+    if (slug) q.set("board", slug);
+    // ?token= works in loopback mode (the SPA injects the session token);
+    // in gated/OAuth mode the cookie already authorizes the request.
+    var tok = null;
+    try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) { /* ignore */ }
+    if (tok) q.set("token", tok);
+    var base = window.__HERMES_BASE_PATH__ || "";
+    return base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?" + q.toString();
+  }
+
+  function addLogDownloadButton(drawerHead) {
+    if (!drawerHead || drawerHead.querySelector("[data-kt-logdownload]")) return;
+
+    var drawer = drawerHead.closest(".hermes-kanban-drawer");
+    var taskId = drawer ? drawer.getAttribute("data-task-id") : null;
+    if (!taskId) {
+      var tid = document.querySelector(".hermes-kanban-drawer[data-task-id]");
+      if (tid) taskId = tid.getAttribute("data-task-id");
+    }
+    if (!taskId) {
+      var label = drawerHead.querySelector("span");
+      if (label && label.textContent) taskId = label.textContent.trim();
+    }
+    if (!taskId) return;
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("data-kt-logdownload", "1");
+    btn.className = "hermes-kanban-drawer-close hermes-kanban-drawer-log-download";
+    btn.title = "Download the full worker log (rotated generations, oldest first)";
+    btn.setAttribute("aria-label", "Download full worker log");
+    btn.textContent = "\u2b07";
+    btn.addEventListener("click", function () {
+      window.open(logDownloadUrl(taskId), "_blank", "noopener");
+    });
+
+    var close = drawerHead.querySelector(".hermes-kanban-drawer-close");
+    if (close && close.parentNode) {
+      close.parentNode.insertBefore(btn, close);
+    } else {
+      drawerHead.appendChild(btn);
+    }
+  }
+
+  function enableLogDownload() {
+    if (logObserver) return;
+    if (!logStyleTag) {
+      logStyleTag = document.createElement("style");
+      logStyleTag.setAttribute("data-hermes-kt", "log-download-button");
+      logStyleTag.textContent = LOG_DOWNLOAD_BUTTON_CSS;
+      document.head.appendChild(logStyleTag);
+    }
+    document.querySelectorAll(".hermes-kanban-drawer-head").forEach(addLogDownloadButton);
+    logObserver = new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var node = added[j];
+          if (node.nodeType !== 1) continue;
+          if (node.matches && node.matches(".hermes-kanban-drawer-head")) {
+            addLogDownloadButton(node);
+            continue;
+          }
+          if (node.querySelector) {
+            var head = node.querySelector(".hermes-kanban-drawer-head");
+            if (head) addLogDownloadButton(head);
+          }
+        }
+      }
+    });
+    logObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function disableLogDownload() {
+    if (logObserver) {
+      logObserver.disconnect();
+      logObserver = null;
+    }
+    if (logStyleTag) {
+      logStyleTag.remove();
+      logStyleTag = null;
+    }
+    document.querySelectorAll("[data-kt-logdownload]").forEach(function (el) {
+      el.remove();
+    });
   }
 
   function addPopoutButton(drawerHead) {
@@ -228,10 +331,13 @@
   function applyAll(cfg) {
     var wide = cfg.wideScrollbars !== false;
     var popout = cfg.popoutTaskButton !== false;
+    var logdl = cfg.logDownloadButton !== false;
     applyWideScrollbars(wide);
     applyPopoutStyles(popout);
     if (popout) enablePopout();
     else disablePopout();
+    if (logdl) enableLogDownload();
+    else disableLogDownload();
   }
 
   // ---- reconcile (worktree auto-cleanup) ----
@@ -444,6 +550,11 @@
                   title: "Open task in new tab",
                   desc: "Add an \u201copen in new tab\u201d button to kanban task cards and the task drawer header.",
                 }),
+                h(Row, {
+                  flag: "logDownloadButton",
+                  title: "Download full worker log",
+                  desc: "Add a \u201cdownload log\u201d button to the task drawer. Streams the task's full on-disk worker log (current + rotated generations) as text in a new tab. Needs the core kanban raw-log endpoint (local patch 0003); without it the link 404s.",
+                }),
               ),
           err ? h("p", { className: "text-sm text-destructive mt-2" }, "Error: " + err) : null,
         ),
@@ -543,7 +654,7 @@
       .then(function (cfg) { applyAll(cfg); })
       .catch(function () {
         // Config unavailable (e.g. plugin disabled mid-session) — default on.
-        applyAll({ wideScrollbars: true, popoutTaskButton: true });
+        applyAll({ wideScrollbars: true, popoutTaskButton: true, logDownloadButton: true });
       });
   }
 

@@ -41,13 +41,15 @@ PLUGIN_ID = "kanban-tools"
 # desktop half agree on the exact set (the desktop Plugins page derives its
 # toggles from plugin.yaml config_schema, which mirrors these).
 BOOL_FEATURES = (
-    "wideScrollbars", "popoutTaskButton", "autoReconcile", "waveEndOnly",
+    "wideScrollbars", "popoutTaskButton", "logDownloadButton",
+    "autoReconcile", "waveEndOnly",
 )
 # Per-feature defaults when the setting is unset — must match plugin.yaml
 # config_schema AND the hook-side reads (reconcile._get_settings).
 BOOL_DEFAULTS = {
     "wideScrollbars": True,
     "popoutTaskButton": True,
+    "logDownloadButton": True,
     "autoReconcile": False,
     "waveEndOnly": True,
 }
@@ -60,6 +62,7 @@ FEATURES = BOOL_FEATURES + STRING_FEATURES
 class ConfigIn(BaseModel):
     wideScrollbars: Optional[bool] = None
     popoutTaskButton: Optional[bool] = None
+    logDownloadButton: Optional[bool] = None
     autoReconcile: Optional[bool] = None
     waveEndOnly: Optional[bool] = None
     reconcileRepoRoot: Optional[str] = None
