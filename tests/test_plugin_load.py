@@ -33,7 +33,8 @@ def main() -> int:
         home = Path(tmp)
         user_plugins = home / "plugins"
         (user_plugins / "kanbantools").mkdir(parents=True)
-        for f in ("plugin.yaml", "__init__.py", "salvage.py", "reconcile.py"):
+        for f in ("plugin.yaml", "__init__.py", "salvage.py",
+                  "reconcile.py", "report.py"):
             shutil.copy(REPO / f, user_plugins / "kanbantools" / f)
 
         # Point HERMES_HOME at the temp dir so discovery scans our copy.
