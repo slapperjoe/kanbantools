@@ -379,8 +379,13 @@
     return (n / 1048576).toFixed(1) + " MB";
   }
 
+  // boardQuery appends after a URL that ALREADY has "?" (/log?tail=…&board=x);
+  // boardQS is for URLs with no query string yet (/tasks/<id>?board=x).
+  // Mixing them up glues "&board=…" into the path — the API then reads the
+  // whole "…<id>&board=<slug>" as the task id and 404s.
   var boardQuery = board ? "&board=" + encodeURIComponent(board) : "";
-  var apiUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + boardQuery;
+  var boardQS = board ? "?board=" + encodeURIComponent(board) : "";
+  var apiUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + boardQS;
   var logUrl = base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/log?tail=150000" + boardQuery;
   // Raw log download — a plain <a href> can't set the session header, so pass
   // the token as a query param (the dashboard auth middleware accepts ?token=).
@@ -418,7 +423,7 @@
     return Promise.all([
       authedFetch(apiUrl).then(checkOk),
       authedFetch(logUrl).then(checkOk),
-      authedFetch(base + "/api/plugins/kanban/assignees" + boardQuery).then(checkOk).catch(function () { return { assignees: [] }; }),
+      authedFetch(base + "/api/plugins/kanban/assignees" + boardQS).then(checkOk).catch(function () { return { assignees: [] }; }),
       authedFetch(base + "/api/plugins/kanban/profiles").then(checkOk).catch(function () { return { profiles: [] }; }),
       authedFetch(base + "/api/plugins/kanban/home-channels?task_id=" + encodeURIComponent(taskId) + boardQuery).then(checkOk).catch(function () { return { home_channels: [] }; }),
     ]).then(function (r) {
@@ -535,7 +540,7 @@
     var v = sel && sel.value;
     if (!v) return;
     var reclaim = !!(document.getElementById("kt-reassign-reclaim").checked);
-    post("/tasks/" + encodeURIComponent(taskId) + "/reassign" + boardQuery,
+    post("/tasks/" + encodeURIComponent(taskId) + "/reassign" + boardQS,
       { profile: v, reclaim_first: reclaim })
       .then(function () { closeReassignModal(); setMsg("Reassigned to " + v + ".", "ok"); return reload(); })
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
@@ -564,12 +569,12 @@
     });
   }
   function doReclaim() {
-    post("/tasks/" + encodeURIComponent(taskId) + "/reclaim" + boardQuery, { reason: "reclaimed from task page" })
+    post("/tasks/" + encodeURIComponent(taskId) + "/reclaim" + boardQS, { reason: "reclaimed from task page" })
       .then(function () { setMsg("Worker reclaimed.", "ok"); return reload(); })
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
   }
   function doSpecify() {
-    post("/tasks/" + encodeURIComponent(taskId) + "/specify" + boardQuery, {})
+    post("/tasks/" + encodeURIComponent(taskId) + "/specify" + boardQS, {})
       .then(function (o) {
         setMsg(o && o.ok ? ("Specified: " + (o.new_title || "")) : (o && o.reason || "specify returned non-OK"), o && o.ok ? "ok" : "error");
         return reload();
@@ -577,7 +582,7 @@
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
   }
   function doDecompose() {
-    post("/tasks/" + encodeURIComponent(taskId) + "/decompose" + boardQuery, {})
+    post("/tasks/" + encodeURIComponent(taskId) + "/decompose" + boardQS, {})
       .then(function (o) {
         setMsg(o && o.ok ? ("Decomposed into " + (o.child_ids || []).length + " children") : (o && o.reason || "decompose returned non-OK"), o && o.ok ? "ok" : "error");
         return reload();
@@ -585,7 +590,7 @@
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
   }
   function doEstimate() {
-    post("/tasks/" + encodeURIComponent(taskId) + "/estimate" + boardQuery, {})
+    post("/tasks/" + encodeURIComponent(taskId) + "/estimate" + boardQS, {})
       .then(function (o) {
         if (o && o.ok) setMsg("Estimate: ~" + o.est_tokens + " tokens, complexity " + o.complexity + " — " + (o.rationale || ""), "ok");
         else setMsg(o && o.reason || "estimate unavailable", "error");
@@ -614,12 +619,12 @@
   }
   function doTerminateRun(runId) {
     if (!window.confirm("Terminate run #" + runId + "? This kills the worker process.")) return;
-    post("/runs/" + runId + "/terminate" + boardQuery, { reason: "terminated from task page" })
+    post("/runs/" + runId + "/terminate" + boardQS, { reason: "terminated from task page" })
       .then(function () { setMsg("Run #" + runId + " terminated.", "ok"); return reload(); })
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
   }
   function doInspectRun(runId) {
-    authedFetch(base + "/api/plugins/kanban/runs/" + runId + "/inspect" + boardQuery)
+    authedFetch(base + "/api/plugins/kanban/runs/" + runId + "/inspect" + boardQS)
       .then(checkOk)
       .then(function (o) {
         if (!o.alive) { setMsg("Run #" + runId + " not alive: " + (o.reason || ""), ""); return; }
@@ -699,21 +704,21 @@
     var fd = new FormData();
     fd.append("file", file);
     fd.append("uploaded_by", "dashboard");
-    authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/attachments" + boardQuery, { method: "POST", body: fd })
+    authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/attachments" + boardQS, { method: "POST", body: fd })
       .then(checkOk)
       .then(function () { setMsg("Attachment uploaded.", "ok"); return reload(); })
       .catch(function (e) { setMsg("Upload failed: " + ((e && e.message) || e), "error"); });
   }
   function deleteAttachment(id, name) {
     if (!window.confirm("Delete attachment \"" + name + "\"?")) return;
-    del("/attachments/" + id + boardQuery)
+    del("/attachments/" + id + boardQS)
       .then(function () { setMsg("Attachment deleted.", "ok"); return reload(); })
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
   }
 
   // ---- home channels ----
   function toggleHome(platform, currentlyOn) {
-    var path = "/tasks/" + encodeURIComponent(taskId) + "/home-subscribe/" + encodeURIComponent(platform) + boardQuery;
+    var path = "/tasks/" + encodeURIComponent(taskId) + "/home-subscribe/" + encodeURIComponent(platform) + boardQS;
     var p = currentlyOn ? del(path) : post(path, {});
     p.then(function () { return reload(); })
       .catch(function (e) { setMsg(String((e && e.message) || e), "error"); });
@@ -983,7 +988,7 @@
     if (atts.length) {
       atts.forEach(function (a) {
         html += '<div class="att-item">' +
-          '<span class="att-name"><a href="' + base + "/api/plugins/kanban/attachments/" + a.id + boardQuery + '" target="_blank">' + esc(a.filename) + "</a></span>" +
+          '<span class="att-name"><a href="' + base + "/api/plugins/kanban/attachments/" + a.id + boardQS + '" target="_blank">' + esc(a.filename) + "</a></span>" +
           '<span class="att-meta">' + fmtBytes(a.size) + " · " + esc(a.uploaded_by || "?") + " · " + timeAgo(a.created_at) + "</span>" +
           '<button class="att-del" data-del="' + a.id + '" data-name="' + esc(a.filename) + '" title="Delete">✕</button>' +
           "</div>";
@@ -1160,7 +1165,7 @@
       if (!body) return;
       cbtn.disabled = true;
       cmsg.textContent = "Posting\u2026";
-      authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/comments" + boardQuery, {
+      authedFetch(base + "/api/plugins/kanban/tasks/" + encodeURIComponent(taskId) + "/comments" + boardQS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: body, author: "dashboard" }),
