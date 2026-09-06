@@ -119,8 +119,13 @@
       var b = (new URLSearchParams(window.location.search).get("board") || "").trim();
       if (b) return b;
     } catch (e) { /* fall through */ }
+    // The webui kanban tab persists its selected board here (core plugin's
+    // LS_BOARD_KEY in plugins/kanban: "hermes.kanban.selectedBoard"). The
+    // popout URL MUST carry the slug: task ids are only unique per board DB,
+    // and a board-less lookup falls back to the CLI's current board — which
+    // 404s every task shown on any other board.
     try {
-      return window.localStorage.getItem("apiprox-selected-board") || null;
+      return window.localStorage.getItem("hermes.kanban.selectedBoard") || null;
     } catch (e) {
       return null;
     }
